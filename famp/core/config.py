@@ -56,6 +56,10 @@ class CookieSettings(BaseModel):
         default=3,
         description="Number of cookie backups to keep"
     )
+    use_pickle: bool = Field(
+        default=True,
+        description="Use pickle format for cookies (recommended for nodriver)"
+    )
 
 
 class BrowserSettings(BaseModel):
