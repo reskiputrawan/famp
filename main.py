@@ -5,10 +5,11 @@ Facebook Account Management Platform (FAMP) main entry point.
 
 import asyncio
 import logging
+import click
 import sys
 from pathlib import Path
 
-from famp.cli import main as cli_main, Context
+from famp.cli import cli, Context
 from famp.core.account import AccountManager
 from famp.core.browser import BrowserManager
 from famp.core.config import Settings
@@ -36,15 +37,21 @@ async def async_main():
         browser_manager = BrowserManager(data_dir=Path(settings.data_dir) / "browsers")
         plugin_manager = PluginManager()
 
-        # Get click context and set components
-        ctx_obj = Context()
-        ctx_obj.settings = settings
-        ctx_obj.account_manager = account_manager
-        ctx_obj.browser_manager = browser_manager
-        ctx_obj.plugin_manager = plugin_manager
+        # Create and populate context
+        context = Context()
+        context.settings = settings
+        context.account_manager = account_manager
+        context.browser_manager = browser_manager
+        context.plugin_manager = plugin_manager
 
         # Run CLI with component instances
-        await cli_main(ctx_obj)
+        try:
+            result = cli.main(args=sys.argv[1:], prog_name="famp", obj=context, standalone_mode=False)
+            if asyncio.iscoroutine(result):
+                await result
+        except click.exceptions.Exit as e:
+            if e.exit_code != 0:
+                raise
 
     except KeyboardInterrupt:
         logger.info("FAMP terminated by user")
@@ -55,7 +62,6 @@ async def async_main():
         # Ensure all browsers are closed
         if 'browser_manager' in locals():
             await browser_manager.close_all()
-
         logger.info("FAMP shutdown complete")
 
     return 0

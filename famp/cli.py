@@ -5,6 +5,7 @@ Command-line interface for FAMP using Click.
 import asyncio
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -57,19 +58,20 @@ def cli(ctx, debug, headless, config):
     - scroll: Scroll through Facebook feed and collect posts
     - publish: Publish posts to Facebook
     """
-    # Create context object
-    context = Context()
+    if ctx.obj is None:
+        # Create context object if not provided
+        context = Context()
 
-    # Load settings
-    context.settings = Settings(config_file=config if config else None)
+        # Load settings
+        context.settings = Settings(config_file=config if config else None)
 
-    # Set debug mode if requested
-    if debug:
-        context.settings.log_level = "DEBUG"
-        os.environ["FAMP_LOG_LEVEL"] = "DEBUG"
+        # Set debug mode if requested
+        if debug:
+            context.settings.log_level = "DEBUG"
+            os.environ["FAMP_LOG_LEVEL"] = "DEBUG"
 
-    # Store context
-    ctx.obj = context
+        # Store context
+        ctx.obj = context
 
 @cli.group()
 @click.pass_context
@@ -291,27 +293,36 @@ def publish(ctx):
     """Publish posts to Facebook."""
     pass
 
+async def run_async_command(ctx: click.Context, cmd, *args, **kwargs):
+    """Run an async command.
+
+    Args:
+        ctx: Click context
+        cmd: Command to run
+        *args: Command arguments
+        **kwargs: Command keyword arguments
+    """
+    with ctx:  # Ensure context is properly pushed/popped
+        if asyncio.iscoroutinefunction(cmd.callback):
+            return await cmd.callback(ctx, *args, **kwargs)
+        return cmd.callback(ctx, *args, **kwargs)
+
 async def main(context: Context):
     """Async entry point for CLI.
 
     Args:
         context: Context object with initialized components
     """
-    # Create click context
     ctx = click.Context(cli)
     ctx.obj = context
 
-    # Get the command line arguments
-    import sys
-    args = sys.argv[1:]
-    
-    if not args:
-        # If no arguments provided, show help
-        args = ['--help']
-    
-    # Run CLI with command line arguments
-    await cli(args, prog_name="famp", standalone_mode=False, obj=ctx.obj)
+    try:
+        # Let Click handle argument parsing
+        result = cli.main(args=sys.argv[1:], prog_name="famp", standalone_mode=False)
+        if asyncio.iscoroutine(result):
+            await result
+    except click.exceptions.Exit:
+        pass
 
 if __name__ == "__main__":
-    # This is only used when running cli.py directly
-    cli(auto_envvar_prefix='FAMP')
+    cli(prog_name="famp")
