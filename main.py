@@ -16,6 +16,7 @@ from famp.core.browser import BrowserManager
 from famp.core.config import Settings
 from famp.core.logging import setup_logging
 from famp.plugin import PluginManager
+from famp.core.context import Context
 
 async def async_main():
     """Async main function to initialize and run FAMP components."""
