@@ -10,7 +10,7 @@ import sys
 import click
 from pathlib import Path
 
-from famp.cli import cli, Context
+from famp.cli import cli, main
 from famp.core.account import AccountManager
 from famp.core.browser import BrowserManager
 from famp.core.config import Settings
@@ -92,29 +92,6 @@ async def handle_shutdown(context: Context) -> None:
         print("Initiating graceful shutdown...")
 
     await context.cleanup()
-
-def main():
-    """Main entry point for FAMP."""
-    try:
-        # Set up event loop based on platform
-        if sys.platform == "win32":
-            loop = asyncio.ProactorEventLoop()
-            asyncio.set_event_loop(loop)
-        else:
-            # Create new event loop instead of getting the current one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Run main function using loop.run_until_complete
-        exit_code = loop.run_until_complete(async_main())
-        sys.exit(exit_code)
-    except KeyboardInterrupt:
-        # Handle KeyboardInterrupt outside of async code
-        print("\nFAMP terminated by user")
-        sys.exit(0)
-    except Exception as e:
-        print(f"Unexpected error in FAMP main: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
