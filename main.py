@@ -13,49 +13,43 @@ logging.basicConfig(
 )
 logger = logging.getLogger("famp")
 
-# Directory for storing browser data and cookies
-DATA_DIR = Path("./data")
-DATA_DIR.mkdir(exist_ok=True, parents=True)
+# Directory for storing cookies
+COOKIES_DIR = Path("./cookies")
+COOKIES_DIR.mkdir(exist_ok=True, parents=True)
 
 
 class BrowserManager:
     """Manages browser instances using nodriver."""
 
-    def __init__(self, data_dir: Path = DATA_DIR / "browsers"):
+    def __init__(self, cookies_dir: Path = COOKIES_DIR):
         """Initialize the browser manager.
-
+        
         Args:
-            data_dir: Directory to store browser data
+            cookies_dir: Directory to store cookies
         """
-        self.data_dir = data_dir
+        self.cookies_dir = cookies_dir
         self.browsers: Dict[str, nd.NoDriver] = {}
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.cookies_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger("famp.browser")
 
     async def get_browser(self, account_id: str) -> nd.NoDriver:
         """Get or create a browser instance for an account.
-
+        
         Args:
             account_id: Unique identifier for the account
-
+            
         Returns:
             Browser instance for the account
         """
         if account_id in self.browsers and self.browsers[account_id].is_running:
             return self.browsers[account_id]
-
-        # Create browser data directory for this account
-        account_dir = self.data_dir / account_id
-        account_dir.mkdir(parents=True, exist_ok=True)
-
+            
         # Initialize new browser
         browser = nd.NoDriver(
             headless=False,  # For POC, use headed mode for visibility
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            user_data_dir=str(account_dir),
-            incognito=False,  # Need persistent storage
         )
-
+        
         # Start the browser
         try:
             await browser.start()
@@ -68,7 +62,7 @@ class BrowserManager:
 
     async def close_browser(self, account_id: str) -> None:
         """Close a browser instance.
-
+        
         Args:
             account_id: Unique identifier for the account
         """
@@ -79,54 +73,48 @@ class BrowserManager:
                 self.logger.info(f"Closed browser for account {account_id}")
             except Exception as e:
                 self.logger.error(f"Error closing browser for account {account_id}: {e}")
-
+                
     async def close_all(self) -> None:
         """Close all browser instances."""
         for account_id in list(self.browsers.keys()):
             await self.close_browser(account_id)
-
-    async def save_cookies(self, account_id: str) -> bool:
+            
+    async def save_cookies(self, account_id: str, tab: nd.Tab) -> bool:
         """Save cookies for an account.
-
+        
         Args:
             account_id: Unique identifier for the account
-
+            tab: Tab to save cookies from
+            
         Returns:
             True if successful, False otherwise
         """
-        if account_id not in self.browsers:
-            self.logger.error(f"No browser found for account {account_id}")
-            return False
-
-        browser = self.browsers[account_id]
-        cookie_path = self.data_dir / account_id / "cookies.pkl"
-
+        cookie_path = self.cookies_dir / f"{account_id}.pkl"
+        
         try:
-            # Use the first tab to save cookies
-            tab = browser.tabs[0]
             await tab.cookies.save(str(cookie_path))
             self.logger.info(f"Saved cookies for account {account_id}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to save cookies for account {account_id}: {e}")
             return False
-
+            
     async def load_cookies(self, account_id: str, tab: nd.Tab) -> bool:
         """Load cookies for an account into a tab.
-
+        
         Args:
             account_id: Unique identifier for the account
             tab: nodriver Tab object to load cookies into
-
+            
         Returns:
             True if successful, False otherwise
         """
-        cookie_path = self.data_dir / account_id / "cookies.pkl"
-
+        cookie_path = self.cookies_dir / f"{account_id}.pkl"
+        
         if not cookie_path.exists():
             self.logger.warning(f"No cookies found for account {account_id}")
             return False
-
+            
         try:
             await tab.cookies.load(str(cookie_path))
             self.logger.info(f"Loaded cookies for account {account_id}")
@@ -138,30 +126,30 @@ class BrowserManager:
 
 class AccountManager:
     """Manages Facebook accounts."""
-
-    def __init__(self, data_dir: Path = DATA_DIR / "accounts"):
+    
+    def __init__(self, accounts_dir: Path = Path("./accounts")):
         """Initialize the account manager.
-
+        
         Args:
-            data_dir: Directory to store account data
+            accounts_dir: Directory to store account data
         """
-        self.data_dir = data_dir
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.accounts_dir = accounts_dir
+        self.accounts_dir.mkdir(parents=True, exist_ok=True)
         self.accounts: Dict[str, Dict[str, Any]] = {}
         self.logger = logging.getLogger("famp.account")
         self._load_accounts()
-
+        
     def _load_accounts(self) -> None:
         """Load accounts from disk."""
         self.accounts = {}
-
-        for account_file in self.data_dir.glob("*.txt"):
+        
+        for account_file in self.accounts_dir.glob("*.txt"):
             account_id = account_file.stem
-
+            
             try:
                 with open(account_file, "r") as f:
                     lines = f.read().strip().split("\n")
-
+                    
                 if len(lines) >= 2:
                     self.accounts[account_id] = {
                         "username": lines[0],
@@ -172,75 +160,75 @@ class AccountManager:
                     self.logger.error(f"Invalid account file format for {account_id}")
             except Exception as e:
                 self.logger.error(f"Failed to load account {account_id}: {e}")
-
+                
     def save_account(self, account_id: str, username: str, password: str) -> bool:
         """Save account credentials.
-
+        
         Args:
             account_id: Unique identifier for the account
             username: Facebook username or email
             password: Facebook password
-
+            
         Returns:
             True if successful, False otherwise
         """
-        account_file = self.data_dir / f"{account_id}.txt"
-
+        account_file = self.accounts_dir / f"{account_id}.txt"
+        
         try:
             with open(account_file, "w") as f:
                 f.write(f"{username}\n{password}")
-
+                
             self.accounts[account_id] = {
                 "username": username,
                 "password": password,
             }
-
+            
             self.logger.info(f"Saved account {account_id}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to save account {account_id}: {e}")
             return False
-
+            
     def get_account(self, account_id: str) -> Optional[Dict[str, str]]:
         """Get account credentials.
-
+        
         Args:
             account_id: Unique identifier for the account
-
+            
         Returns:
             Account credentials or None if not found
         """
         return self.accounts.get(account_id)
-
+        
     def list_accounts(self) -> List[str]:
         """List all account IDs.
-
+        
         Returns:
             List of account IDs
         """
         return list(self.accounts.keys())
-
+        
     def remove_account(self, account_id: str) -> bool:
         """Remove an account.
-
+        
         Args:
             account_id: Unique identifier for the account
-
+            
         Returns:
             True if successful, False otherwise
         """
-        account_file = self.data_dir / f"{account_id}.txt"
-
+        account_file = self.accounts_dir / f"{account_id}.txt"
+        
         if not account_file.exists():
             self.logger.warning(f"Account {account_id} does not exist")
             return False
-
+            
         try:
             account_file.unlink()
-
+            
             if account_id in self.accounts:
                 del self.accounts[account_id]
-
+                
             self.logger.info(f"Removed account {account_id}")
             return True
         except Exception as e:
@@ -353,56 +341,56 @@ class LoginPlugin:
 async def main():
     """Run the FAMP POC."""
     logger.info("Starting FAMP POC")
-
+    
     # Initialize managers
     browser_manager = BrowserManager()
     account_manager = AccountManager()
     plugin_manager = PluginManager()
-
+    
     # Register plugins
     login_plugin = LoginPlugin()
     plugin_manager.register_plugin("login", login_plugin)
-
+    
     try:
         # Check for accounts
         accounts = account_manager.list_accounts()
-
+        
         if not accounts:
             # Create a sample account if none exist
             print("No accounts found. Please enter Facebook credentials:")
             account_id = input("Account ID (e.g., work, personal): ")
             username = input("Email or Phone: ")
             password = input("Password: ")
-
+            
             account_manager.save_account(account_id, username, password)
             accounts = [account_id]
-
+            
         # Run login plugin for first account
         account_id = accounts[0]
         account = account_manager.get_account(account_id)
-
+        
         if account:
             # Get browser for account
             browser = await browser_manager.get_browser(account_id)
             tab = await browser.new_tab()
-
+            
             # Try to load cookies
             await browser_manager.load_cookies(account_id, tab)
-
+            
             # Run login plugin
             login_plugin = plugin_manager.get_plugin("login")
             result = await login_plugin.run(tab, account)
-
+            
             print(f"Login result: {result}")
-
+            
             # Save cookies if login successful
             if result["status"] == "success":
-                await browser_manager.save_cookies(account_id)
-
+                await browser_manager.save_cookies(account_id, tab)
+                
             # Keep browser open for demonstration
             print("Press Enter to close the browser...")
             input()
-
+        
     finally:
         # Clean up
         await browser_manager.close_all()
