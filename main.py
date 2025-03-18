@@ -71,19 +71,18 @@ async def handle_shutdown(context: Context) -> None:
 
     await context.cleanup()
 
-    # Stop the event loop
-    loop = asyncio.get_event_loop()
-    loop.stop()
-
 def main():
     """Main entry point for FAMP."""
     try:
+        # Set up event loop based on platform
         if sys.platform == "win32":
-            # Use ProactorEventLoop on Windows for better subprocess support
             loop = asyncio.ProactorEventLoop()
             asyncio.set_event_loop(loop)
+        else:
+            loop = asyncio.get_event_loop()
 
-        exit_code = asyncio.run(async_main())
+        # Run main function using loop.run_until_complete
+        exit_code = loop.run_until_complete(async_main())
         sys.exit(exit_code)
     except KeyboardInterrupt:
         # Handle KeyboardInterrupt outside of async code
