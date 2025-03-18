@@ -81,11 +81,6 @@ class BrowserManager:
 
         # Add additional arguments for better isolation
         args.extend([
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--disable-web-security",
-            "--disable-features=IsolateOrigins,site-per-process"
         ])
 
         # Start browser without user data directory
