@@ -1,0 +1,76 @@
+plan_name: "__plan_name__"
+
+# Pattern type - select one: list, list-reflection, list-director
+pattern: list
+
+# (Optional) Run in architect mode where main_model reasons then drafts the code and editor_model writes the code
+architect: true
+
+# (Optional) Model selection - if not specified, will use system defaults
+main_model: "anthropic/claude-3-7-sonnet-20250219"
+
+# Used only if architect is true
+editor_model: "anthropic/claude-3-7-sonnet-20250219"
+
+# (Optional) Level of reasoning effort (low, medium, high) for complex tasks
+# reasoning_effort: high
+
+# Code you want your AI Coding Assistant to edit
+editable_context:
+  - "./path/to/file1.py"
+  - "./path/to/file2.py"
+
+# Code you want your AI Coding Assistant to read but not edit
+readonly_context:
+  - "./path/to/reference_file.py"
+
+high_level_objective: "Concise description of the feature or change being implemented"
+
+# (Optional) Detailed explanation of the implementation requirements
+implementation_details: |
+  Provide detailed implementation requirements here. This should include:
+  
+  1. Background information about the feature
+  2. Technical requirements and constraints
+  3. Expected behavior and acceptance criteria
+  4. Any specific implementation guidelines or patterns to follow
+  5. Integration points with existing code
+  
+  The more detailed this section, the better guidance the AI will have.
+
+# Your list of tasks aka prompts that will be executed in order one by one
+tasks:
+  - title: "Task 1: High level description of first task"
+    prompt: |
+      Detailed coding prompt for task 1. Be specific about:
+      
+      1. Which files to modify
+      2. What changes to make
+      3. Any specific functions or classes to update
+      4. Expected behavior of the changes
+    
+    # (Optional) Number of reflections to perform after coding the task
+    # Higher values result in more thorough self-review and refinement
+    reflection_count: 1
+    
+    # (Optional - list-director pattern only) Number of evaluator attempts if task fails evaluation
+    # evaluator_count: 3
+    
+    # (Optional - list-director pattern only) Command to run to evaluate if task was completed successfully
+    # evaluator_command: "uv run pytest"
+
+  - title: "Task 2: High level description of second task"
+    prompt: |
+      Detailed coding prompt for task 2.
+      
+      Follow the same format as task 1, providing clear and specific instructions.
+    
+    # reflection_count: 1
+
+  - title: "Task 3: High level description of third task"
+    prompt: |
+      Detailed coding prompt for task 3.
+      
+      Remember to include all necessary context and requirements.
+    
+    # reflection_count: 2

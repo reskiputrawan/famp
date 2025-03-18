@@ -1,0 +1,196 @@
+plan_name: 'famp-plugin-enhancement'
+
+# used only if mode is "architect: true"
+editor_model: 'anthropic/claude-3-7-sonnet-20250219'
+
+# Code you want your AI Coding Assistant to edit
+editable_context:
+  - 'famp/plugin.py'
+  - 'famp/core/context.py'
+  - 'famp/cli.py'
+  - 'plugins/login/main.py'
+  - 'plugins/__init__.py'
+  - 'plugins/manual_login/main.py'
+
+# Code you want your AI Coding Assistant to read but not edit
+readonly_context:
+  - 'famp/core/account.py'
+  - 'famp/core/browser.py'
+  - 'famp/core/config.py'
+  - 'famp/core/logging.py'
+  - 'tests/conftest.py'
+  - 'tests/test_browser.py'
+
+high_level_objective: "Enhance FAMP plugin system with improved error handling, plugin dependencies, and workflow capabilities"
+
+implementation_details: |
+  We're enhancing the FAMP plugin system to support more advanced features and improve reliability.
+  
+  The current implementation provides basic plugin functionality but lacks robust error handling,
+  proper dependency management, and the ability to chain plugins into workflows.
+  
+  We'll implement the following improvements:
+  
+  1. Enhance error handling and recovery in the plugin system:
+     - Add structured error classes for different failure types
+     - Implement graceful recovery mechanisms
+     - Improve error reporting with actionable information
+  
+  2. Add comprehensive plugin dependency management:
+     - Enhance the `requires` property to support version constraints
+     - Implement circular dependency detection
+     - Add dependency validation at plugin loading time
+  
+  3. Implement a basic workflow capability:
+     - Allow defining sequences of plugins to be executed
+     - Support conditional execution based on previous plugin results
+     - Enable data passing between plugins in a workflow
+     - Add workflow persistence and resumability
+  
+  4. Add plugin metadata and discovery enhancements:
+     - Support for plugin configuration schemas
+     - Plugin categories and tagging
+     - Plugin health/status reporting
+  
+  5. Improve the two-factor authentication capabilities in the login plugin:
+     - Replace the placeholder with actual TOTP generation
+     - Support for SMS and email based 2FA
+     - Backup code support
+
+# your list of tasks aka prompts that will be executed in order one by one
+tasks:
+  - title: 'Create structured error handling for plugins'
+    prompt: |
+      UPDATE famp/plugin.py to implement structured error handling:
+      
+      1. Create a hierarchy of exception classes:
+         - `PluginError` as the base exception
+         - `PluginConfigError` for configuration issues
+         - `PluginExecutionError` for runtime failures
+         - `PluginDependencyError` for dependency problems
+      
+      2. Modify the Plugin class to handle these exceptions properly
+      
+      3. Update the run_plugin method in PluginManager to use structured error handling:
+         - Catch specific exception types
+         - Include error codes and better error messages
+         - Add context information to errors (plugin name, account, timestamp)
+      
+      4. Add a recovery mechanism for transient failures:
+         - Add retry capabilities with configurable attempts
+         - Implement exponential backoff for retries
+         - Enable plugins to specify which errors are retryable
+    reflection_count: 1
+
+  - title: 'Enhance plugin dependency management'
+    prompt: |
+      UPDATE famp/plugin.py to improve dependency management:
+      
+      1. Enhance the `requires` property in the Plugin class:
+         - Change return type to a more structured format that can express version constraints
+         - Add support for optional dependencies
+      
+      2. Add dependency validation in PluginManager:
+         - Check that all required plugins are available
+         - Validate version constraints
+         - Detect circular dependencies using a directed graph approach
+         - Provide clear error messages for dependency issues
+      
+      3. Implement dependency resolution in `run_plugin` method:
+         - Construct the correct execution order based on dependencies
+         - Handle optional dependencies appropriately
+         - Pass results between dependent plugins
+    reflection_count: 1
+
+  - title: 'Implement basic workflow capabilities'
+    prompt: |
+      CREATE a new file famp/workflow.py to implement workflow capabilities:
+      
+      1. Define a Workflow class that can:
+         - Store a sequence of plugins to execute
+         - Track execution state and results
+         - Support conditional execution based on previous plugin results
+         - Pass data between plugins
+      
+      2. Add workflow persistence:
+         - Save workflow state to disk
+         - Support resuming a workflow from a failure point
+         - Track workflow execution history
+      
+      3. Integrate with the PluginManager:
+         - Add methods to create and run workflows
+         - Ensure proper handling of plugin dependencies within workflows
+      
+      UPDATE famp/cli.py to add workflow commands:
+         - Add a new command group `workflow`
+         - Implement commands for creating, listing, and running workflows
+         - Add support for workflow configuration files
+    reflection_count: 2
+
+  - title: 'Enhance plugin metadata and discovery'
+    prompt: |
+      UPDATE famp/plugin.py to improve plugin metadata and discovery:
+      
+      1. Extend the Plugin class with additional metadata:
+         - Add support for categories/tags
+         - Include configuration schema definitions
+         - Add documentation fields
+         - Track plugin health/status
+      
+      2. Enhance the PluginManager discovery mechanism:
+         - Add support for plugin versioning
+         - Implement plugin conflict resolution
+         - Enable plugin hot-reloading
+         - Add plugin search by metadata (category, tags, etc.)
+      
+      3. Implement a plugin health check system:
+         - Add a method to validate plugin functionality
+         - Track plugin reliability metrics
+         - Support automatic disabling of problematic plugins
+    reflection_count: 1
+
+  - title: 'Implement proper two-factor authentication in login plugin'
+    prompt: |
+      UPDATE plugins/login/main.py to properly implement two-factor authentication:
+      
+      1. Replace the placeholder 2FA code with actual TOTP implementation:
+         - Use a proper TOTP library
+         - Generate codes from two_factor_secret
+         - Handle different TOTP parameters (digits, period, algorithm)
+      
+      2. Add support for additional 2FA methods:
+         - Implement SMS code handling
+         - Add email code support
+         - Support backup codes
+      
+      3. Improve 2FA detection and handling:
+         - Better selectors for detecting 2FA challenges
+         - Add support for "remember this device" option
+         - Handle "suspicious activity" challenges
+         - Implement proper error handling for 2FA failures
+    reflection_count: 1
+
+  - title: 'Create comprehensive test suite for enhanced plugin system'
+    prompt: |
+      CREATE tests for the enhanced plugin system:
+      
+      1. Create test fixtures for plugin testing:
+         - Mock plugins with different dependency structures
+         - Sample workflows for testing
+         - Error condition simulations
+      
+      2. Implement unit tests for new plugin features:
+         - Error handling and recovery
+         - Dependency resolution
+         - Plugin metadata and discovery
+      
+      3. Implement integration tests for workflows:
+         - Test workflow creation and execution
+         - Test conditional execution
+         - Test workflow persistence and resumption
+      
+      4. Test the enhanced 2FA implementation:
+         - TOTP code generation and validation
+         - Alternative 2FA methods
+         - Error handling for 2FA
+    reflection_count: 1

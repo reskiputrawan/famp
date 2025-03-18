@@ -1,0 +1,6 @@
+- Complete core functionality (especially 2FA)
+- Add more extensive testing
+- Improve error handling and recovery
+- Create documentation for plugin developers
+- Implement basic session management
+- Add logging and telemetry infrastructure

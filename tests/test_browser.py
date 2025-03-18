@@ -50,18 +50,157 @@ async def test_browser_creation(browser_manager):
         # Mock browser object
         mock_browser = MagicMock()
         mock_start.return_value = mock_browser
-        
+
         # Get a browser
         browser = await browser_manager.get_browser("test_account", headless=True)
-        
+
         # Verify browser was created correctly
         assert browser == mock_browser
         assert "test_account" in browser_manager.browsers
         mock_start.assert_called_once()
-        
+
         # Arguments should include headless mode
         args = mock_start.call_args[1]["browser_args"]
         assert "--headless=new" in args
+
+
+@pytest.mark.asyncio
+async def test_browser_start_stop_simple(tmp_data_dir):
+    """Simple test for browser start and stop functionality."""
+    # Create a new browser manager
+    manager = BrowserManager(data_dir=tmp_data_dir)
+    
+    with patch("famp.core.browser.start", new_callable=AsyncMock) as mock_start:
+        # Mock browser object with stop method
+        mock_browser = MagicMock()
+        mock_browser.stop = MagicMock()
+        mock_start.return_value = mock_browser
+        
+        # Start browser
+        browser = await manager.get_browser("test_account")
+        
+        # Verify browser was created
+        assert browser == mock_browser
+        assert "test_account" in manager.browsers
+        mock_start.assert_called_once()
+        
+        # Stop browser
+        result = await manager.close_browser("test_account")
+        
+        # Verify browser was stopped
+        assert result is True
+        assert "test_account" not in manager.browsers
+        mock_browser.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_lifecycle(tmp_data_dir):
+    """Test the complete browser lifecycle with different configurations."""
+    # Create a new browser manager
+    manager = BrowserManager(data_dir=tmp_data_dir)
+    
+    # Test cases with different configurations
+    test_cases = [
+        {"account_id": "test1", "headless": True, "proxy": None, "user_agent": None},
+        {"account_id": "test2", "headless": False, "proxy": "localhost:8080", "user_agent": None},
+        {"account_id": "test3", "headless": True, "proxy": None, "user_agent": "Custom Agent"}
+    ]
+    
+    for case in test_cases:
+        with patch("famp.core.browser.start", new_callable=AsyncMock) as mock_start:
+            # Mock browser and tab objects
+            mock_tab = AsyncMock()
+            mock_tab.cookies = AsyncMock()
+            mock_tab.cookies.get_all = AsyncMock(return_value=[])
+            
+            mock_browser = MagicMock()
+            mock_browser.main_tab = mock_tab
+            mock_browser.stop = MagicMock()
+            mock_start.return_value = mock_browser
+            
+            # Start browser with specific configuration
+            browser = await manager.get_browser(
+                case["account_id"], 
+                headless=case["headless"],
+                proxy=case["proxy"],
+                user_agent=case["user_agent"]
+            )
+            
+            # Verify browser was created with correct arguments
+            assert browser == mock_browser
+            assert case["account_id"] in manager.browsers
+            
+            # Verify proxy and user_agent if provided
+            args = mock_start.call_args[1]["browser_args"]
+            if case["headless"]:
+                assert "--headless=new" in args
+            if case["proxy"]:
+                assert f"--proxy-server={case['proxy']}" in args
+            if case["user_agent"]:
+                assert f"--user-agent={case['user_agent']}" in args
+            
+            # Get a tab
+            tab = await manager.get_tab(case["account_id"])
+            assert tab == mock_tab
+            assert case["account_id"] in manager.active_tabs
+            
+            # Save cookies (should be empty at this point)
+            save_result = await manager.save_cookies(case["account_id"])
+            assert save_result is True
+            
+            # Verify cookie file was created
+            cookie_path = tmp_data_dir / "cookies" / case["account_id"] / "cookies.json"
+            assert cookie_path.exists()
+            
+            # Stop browser
+            close_result = await manager.close_browser(case["account_id"])
+            
+            # Verify browser was stopped
+            assert close_result is True
+            assert case["account_id"] not in manager.browsers
+            assert case["account_id"] not in manager.active_tabs
+            mock_browser.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_start_failure(tmp_data_dir):
+    """Test handling of browser startup failures."""
+    # Create a new browser manager
+    manager = BrowserManager(data_dir=tmp_data_dir)
+    
+    # Test browser startup failure
+    with patch("famp.core.browser.start", new_callable=AsyncMock) as mock_start:
+        # Mock browser startup failure
+        mock_start.side_effect = Exception("Failed to start browser")
+        
+        # Attempt to start browser
+        with pytest.raises(Exception) as excinfo:
+            await manager.get_browser("test_account")
+        
+        # Verify error message
+        assert "Failed to start browser" in str(excinfo.value)
+        
+        # Verify browser is not registered in manager
+        assert "test_account" not in manager.browsers
+        
+    # Test browser creation succeeded but tab acquisition fails
+    with patch("famp.core.browser.start", new_callable=AsyncMock) as mock_start:
+        # Create a mock browser where the tab is broken
+        mock_browser = MagicMock()
+        mock_browser.main_tab = None  # Tab is missing/broken
+        mock_start.return_value = mock_browser
+        
+        # Browser creation should succeed
+        browser = await manager.get_browser("test_account")
+        assert browser == mock_browser
+        assert "test_account" in manager.browsers
+        
+        # But getting a tab should fail or return None
+        with patch.object(mock_browser, "main_tab", None):
+            # Testing a code path where we handle tab being None
+            # This will pass since we're just checking if it doesn't raise
+            await manager.get_tab("test_account")
+            assert "test_account" not in manager.active_tabs
 
 
 @pytest.mark.asyncio

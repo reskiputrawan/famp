@@ -8,9 +8,14 @@ from typing import Dict, Any, Optional
 from nodriver import Tab
 
 from famp.core.account import FacebookAccount
-from famp.plugin import Plugin
+from famp.plugin import Plugin, PluginError, ErrorCode
+from plugins.login.main import LoginError, TwoFactorError, LoginPlugin
 
 logger = logging.getLogger(__name__)
+
+class ManualLoginError(LoginError):
+    """Error raised during manual login process."""
+    pass
 
 
 class ManualLoginPlugin(Plugin):
@@ -38,6 +43,8 @@ class ManualLoginPlugin(Plugin):
         """Initialize the plugin."""
         super().__init__()
         self.config.update(self.DEFAULT_CONFIG)
+        # Use the improved login detection from LoginPlugin
+        self._login_plugin = LoginPlugin()
 
     async def run(self, tab: Tab, account: FacebookAccount) -> Dict[str, Any]:
         """Run the manual login process.
@@ -48,6 +55,9 @@ class ManualLoginPlugin(Plugin):
 
         Returns:
             Dictionary with execution results
+
+        Raises:
+            ManualLoginError: If login process fails
         """
         logger.info(f"Starting manual login process for account {account.account_id}")
         results = {
@@ -61,237 +71,154 @@ class ManualLoginPlugin(Plugin):
         start_time = time.time()
 
         try:
-            # Check if already logged in
-            await tab.get(self.HOME_URL)
-            await asyncio.sleep(3)  # Wait for page to load
-            
-            # Check if already logged in
-            if await self._is_logged_in(tab):
-                logger.info(f"Account {account.account_id} is already logged in")
-                if self.config["skip_if_logged_in"]:
-                    results.update({
-                        "success": True,
-                        "logged_in": True,
-                        "status": "Already logged in",
-                        "message": "Account was already logged in, skipping login process"
-                    })
-                    return results
-            
-            # Navigate to login page
-            await tab.get(self.LOGIN_URL)
-            await asyncio.sleep(2)
-            
-            # Auto-fill email if configured
-            if self.config["auto_fill_email"] and account.email:
-                logger.info("Auto-filling email field")
-                await tab.execute_script("""
-                    document.querySelector('input[name="email"]').value = arguments[0];
-                """, account.email)
-            
-            # Auto-fill password if configured (not recommended for security)
-            if self.config["auto_fill_password"] and account.password:
-                logger.info("Auto-filling password field")
-                await tab.execute_script("""
-                    document.querySelector('input[name="pass"]').value = arguments[0];
-                """, account.password)
-            
-            # Inform user about manual login requirement
-            print("\n" + "="*50)
-            print(f"MANUAL LOGIN REQUIRED for account: {account.email}")
-            print("Please complete the login process in the browser window.")
-            print("This plugin will wait and verify your login status.")
-            if account.two_factor_secret:
-                print("NOTE: This account has 2FA enabled. You'll need to enter the code.")
-            print("="*50 + "\n")
-            
-            # Wait for manual login completion
-            login_result = await self._wait_for_login_completion(tab)
-            
-            if login_result["logged_in"]:
-                logger.info(f"Manual login successful for account {account.account_id}")
-                results.update({
-                    "success": True,
-                    "logged_in": True,
-                    "status": login_result["status"],
-                    "message": login_result["message"]
-                })
-            else:
-                logger.warning(f"Manual login failed for account {account.account_id}: {login_result['message']}")
+            try:
+                # Check if already logged in
+                await tab.get(self.HOME_URL)
+                await asyncio.sleep(3)  # Wait for page to load
+
+                # Check if already logged in
+                if await self._login_plugin.is_logged_in(tab):
+                    logger.info(f"Account {account.account_id} is already logged in")
+                    if self.config["skip_if_logged_in"]:
+                        results.update({
+                            "success": True,
+                            "logged_in": True,
+                            "status": "already_logged_in",
+                            "message": "Account was already logged in, skipping login process"
+                        })
+                        return results
+
+                # Navigate to login page
+                await tab.get(self.LOGIN_URL)
+                await asyncio.sleep(2)
+
+                # Auto-fill email if configured
+                if self.config["auto_fill_email"] and account.email:
+                    try:
+                        email_field = await tab.select("input[name='email']", timeout=5)
+                        if email_field:
+                            await email_field.clear_input()
+                            await email_field.send_keys(account.email)
+                            logger.info("Auto-filled email field")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-fill email: {e}")
+
+                # Auto-fill password if configured (not recommended for security)
+                if self.config["auto_fill_password"] and account.password:
+                    try:
+                        password_field = await tab.select("input[name='pass']", timeout=5)
+                        if password_field:
+                            await password_field.clear_input()
+                            await password_field.send_keys(account.password.get_secret_value())
+                            logger.info("Auto-filled password field")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-fill password: {e}")
+
+                # Inform user about manual login requirement
+                print("\n" + "="*50)
+                print(f"MANUAL LOGIN REQUIRED for account: {account.email}")
+                print("Please complete the login process in the browser window.")
+                print("This plugin will wait and verify your login status.")
+                if account.two_factor_secret:
+                    print("NOTE: This account has 2FA enabled. You'll need to enter the code.")
+                print("="*50 + "\n")
+
+                # Wait for manual login completion
+                try:
+                    is_completed = await self._wait_for_login_completion(tab)
+                    if is_completed:
+                        logger.info(f"Manual login successful for account {account.account_id}")
+                        results.update({
+                            "success": True,
+                            "logged_in": True,
+                            "status": "logged_in",
+                            "message": "Manual login completed successfully"
+                        })
+                    else:
+                        raise ManualLoginError(
+                            "Manual login timed out",
+                            {"timeout": self.config["wait_timeout"]}
+                        )
+
+                except TwoFactorError:
+                    # Pass through 2FA errors unmodified
+                    raise
+                except Exception as e:
+                    if not isinstance(e, ManualLoginError):
+                        e = ManualLoginError(str(e))
+                    raise e
+
+            except (TwoFactorError, ManualLoginError) as e:
+                logger.error(f"Manual login error: {e}")
                 results.update({
                     "success": False,
-                    "logged_in": False,
-                    "status": login_result["status"],
-                    "message": login_result["message"]
+                    "status": "error",
+                    "message": str(e),
+                    "error": e.to_dict()
                 })
-                
-        except Exception as e:
-            error_msg = f"Error during manual login: {str(e)}"
-            logger.error(error_msg)
-            results.update({
-                "success": False,
-                "status": "Error",
-                "message": error_msg
-            })
-        
-        # Calculate time taken
-        results["time_taken"] = round(time.time() - start_time, 2)
-        return results
+                raise
 
-    async def _is_logged_in(self, tab: Tab) -> bool:
-        """Check if user is logged in to Facebook.
-        
-        Args:
-            tab: Browser tab
-            
-        Returns:
-            True if logged in, False otherwise
-        """
-        # Check for elements that indicate logged-in status
-        logged_in_indicators = [
-            # Top navigation bar profile link
-            "a[href*='/me/']",
-            # Facebook logo home link when logged in
-            "a[aria-label='Facebook'] svg",
-            # User menu button
-            "div[aria-label='Your profile'] img",
-            # Stories section
-            "div[data-pagelet='Stories']",
-        ]
-        
-        for selector in logged_in_indicators:
-            try:
-                elements = await tab.query_selector_all(selector)
-                if elements:
-                    return True
-            except:
-                pass
-        
-        # Check for login form elements which indicate not logged in
-        logout_indicators = [
-            "form[action*='/login/']",
-            "input[name='email']",
-            "input[name='pass']",
-            "button[name='login']",
-        ]
-        
-        for selector in logout_indicators:
-            try:
-                elements = await tab.query_selector_all(selector)
-                if elements:
-                    return False
-            except:
-                pass
-        
-        # If we can't determine for sure, default to not logged in
-        return False
+        finally:
+            # Calculate time taken
+            results["time_taken"] = round(time.time() - start_time, 2)
+            return results
 
-    async def _is_checkpoint_page(self, tab: Tab) -> bool:
-        """Check if current page is a checkpoint/2FA page.
-        
-        Args:
-            tab: Browser tab
-            
-        Returns:
-            True if on checkpoint page, False otherwise
-        """
-        # Check URL
-        current_url = await tab.get_url()
-        if "checkpoint" in current_url:
-            return True
-        
-        # Check for checkpoint elements
-        checkpoint_indicators = [
-            "input[name='approvals_code']",
-            "input#approvals_code",
-            "form[action*='/checkpoint/']",
-            "button[value='Continue']",
-            "div[data-pagelet='Portal/LoginApprovalPage']",
-        ]
-        
-        for selector in checkpoint_indicators:
-            try:
-                elements = await tab.query_selector_all(selector)
-                if elements:
-                    return True
-            except:
-                pass
-        
-        return False
-
-    async def _wait_for_login_completion(self, tab: Tab) -> Dict[str, Any]:
+    async def _wait_for_login_completion(self, tab: Tab) -> bool:
         """Wait for the manual login process to complete.
-        
+
         Args:
             tab: Browser tab
-            
+
         Returns:
-            Dictionary with login status information
+            True if login completed successfully, False otherwise
+
+        Raises:
+            TwoFactorError: If 2FA verification is needed
+            ManualLoginError: If login fails or times out
         """
         wait_timeout = self.config["wait_timeout"]
         check_interval = self.config["check_interval"]
-        
-        result = {
-            "logged_in": False,
-            "status": "Timeout",
-            "message": f"Login not completed within {wait_timeout} seconds"
-        }
-        
         end_time = time.time() + wait_timeout
-        
+
         while time.time() < end_time:
             logger.debug("Checking login status...")
-            
-            # Check if on checkpoint/2FA page
-            if await self._is_checkpoint_page(tab):
-                print("2FA/Security checkpoint detected. Please complete verification in the browser.")
-                result.update({
-                    "status": "Checkpoint",
-                    "message": "Waiting for security verification to be completed"
-                })
-            
-            # Check if logged in
-            if await self._is_logged_in(tab):
-                result.update({
-                    "logged_in": True,
-                    "status": "Success",
-                    "message": "Login completed successfully"
-                })
-                return result
-            
-            # Wait before next check
-            await asyncio.sleep(check_interval)
-            
-            # Notify user about remaining time
+
+            try:
+                # Check if on checkpoint/2FA page
+                code_input = await tab.select("#approvals_code", timeout=5)
+                if code_input:
+                    logger.info("2FA/Security checkpoint detected")
+                    raise TwoFactorError(
+                        "Manual 2FA verification required",
+                        {"remaining_time": int(end_time - time.time())}
+                    )
+
+                # Check for login errors
+                for selector in [".login_error_box", "div._9ay7", "div[role='alert']"]:
+                    error = await tab.select(selector, timeout=2)
+                    if error:
+                        error_text = await error.text()
+                        raise ManualLoginError(
+                            f"Login error: {error_text}",
+                            {"error_message": error_text}
+                        )
+
+                # Use improved login detection from LoginPlugin
+                if await self._login_plugin.is_logged_in(tab):
+                    return True
+
+            except TwoFactorError:
+                raise
+            except Exception as e:
+                if isinstance(e, ManualLoginError):
+                    raise
+                logger.debug(f"Login check error: {e}")
+
+            # Notify about remaining time
             remaining = int(end_time - time.time())
             if remaining % 30 == 0:  # Notify every 30 seconds
-                print(f"Still waiting for manual login... ({remaining}s remaining)")
-        
-        return result
-    
-    async def _detect_login_errors(self, tab: Tab) -> Optional[str]:
-        """Detect and return any login error messages.
-        
-        Args:
-            tab: Browser tab
-            
-        Returns:
-            Error message if found, None otherwise
-        """
-        error_selectors = [
-            "div.login_error_box",
-            "div._9ay7",
-            "div[role='alert']",
-            "#error_box",
-        ]
-        
-        for selector in error_selectors:
-            try:
-                elements = await tab.query_selector_all(selector)
-                if elements:
-                    error_text = await tab.evaluate(f"document.querySelector('{selector}').textContent")
-                    if error_text:
-                        return error_text.strip()
-            except:
-                pass
-        
-        return None
+                logger.info(f"Waiting for manual login... ({remaining}s remaining)")
+
+            await asyncio.sleep(check_interval)
+
+        return False
