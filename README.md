@@ -1,4 +1,4 @@
-# FAMP: Facebook Account Management Platform
+# FAMP - Facebook Account Management Platform
 
 A scalable automation platform for managing multiple Facebook accounts using `nodriver`.
 
@@ -20,6 +20,10 @@ cd famp
 pip install -e .
 ```
 
+```
+pip install -r requirements.txt
+```
+
 ## Usage
 
 ```bash
@@ -35,6 +39,49 @@ python -m famp account remove
 python -m famp plugin login -a account_name
 ```
 
+```
+python main.py [OPTIONS] COMMAND [ARGS]...
+```
+
+### Global Options
+
+- `--debug/--no-debug`: Enable debug mode with verbose logging
+- `--headless/--no-headless`: Run browser in headless/visible mode (default: headless)
+- `-h, --help`: Show this help message
+- `--version`: Show the version and exit
+
+### Available Commands
+
+- `login`: Automate Facebook login process
+- `scroll`: Scroll through Facebook feed and collect posts
+- `publish`: Publish posts to Facebook
+
+### Examples
+
+Login to Facebook:
+
+```
+python main.py login
+```
+
+Scroll through feed:
+
+```
+python main.py scroll
+```
+
+Publish a post:
+
+```
+python main.py publish
+```
+
 ## Development
 
 This project is currently in POC phase.
+
+Using uv:
+
+```
+uv run main.py [OPTIONS] COMMAND [ARGS]...
+```
