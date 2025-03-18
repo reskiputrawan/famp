@@ -13,15 +13,13 @@ A scalable automation platform for managing multiple Facebook accounts using `no
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/famp.git
+git clone https://github.com/reskiputrawan/famp.git
 cd famp
 
 # Install dependencies
-pip install -e .
-```
 
 ```
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Usage
@@ -84,15 +82,15 @@ FAMP uses pickle format to save browser cookies with nodriver, providing seamles
 # Example of working with cookies programmatically
 async def save_and_load_cookies():
     browser_manager = BrowserManager()
-    
+
     # Get browser for an account
     browser = await browser_manager.get_browser("account_name")
-    
+
     # Navigation happens here...
-    
+
     # Save cookies for later
     await browser_manager.save_cookies("account_name")
-    
+
     # In another session, load the cookies
     await browser_manager.load_cookies("account_name")
 ```

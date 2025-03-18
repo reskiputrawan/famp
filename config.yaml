@@ -1,0 +1,42 @@
+# FAMP Configuration File
+
+# Environment settings
+env: dev # Options: dev, test, prod
+data_dir: ~/.famp
+
+# Logging settings
+logging:
+  level: ERROR # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: ~/.famp/logs/famp.log
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  rotate_size: 10485760 # 10 MB
+  backup_count: 5
+
+# Security settings
+security:
+  cookie_encryption: true
+  secure_storage: true
+
+# Browser settings
+browser:
+  default_headless: false
+  default_timeout: 30
+  cookies:
+    domain_filter:
+      - facebook.com
+      - fb.com
+      - fbcdn.net
+    expiration_days: 30
+    auto_refresh: true
+    backup_enabled: true
+    backup_count: 3
+  extra_args:
+#    - '--proxy={}'
+
+# Plugin settings
+plugins:
+  auto_load: true
+  plugin_dirs:
+    - ~/.famp/plugins
+    - /Users/ekki/Library/projects/github/famp/plugins # Adding project plugins directory
+  disabled_plugins: []
