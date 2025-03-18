@@ -5,7 +5,6 @@ This directory contains templates for creating AI-assisted coding specifications
 ## Available Templates
 
 - `standard_template.yml` - Comprehensive template with support for all patterns
-- `refactor.yml` - Simplified template focused on refactoring tasks
 
 ## Field Descriptions
 

@@ -55,12 +55,14 @@ class AccountManager:
                 # Convert plain password to SecretStr
                 if isinstance(account_data.get("password"), str):
                     password = account_data["password"]
-                    account_data["password"] = self._decrypt_password(password)
+                    decrypted = self._decrypt_password(password)
+                    account_data["password"] = SecretStr(decrypted)
 
                 # Convert plain two_factor_secret to SecretStr if exists
                 if isinstance(account_data.get("two_factor_secret"), str):
                     two_factor = account_data["two_factor_secret"]
-                    account_data["two_factor_secret"] = self._decrypt_password(two_factor)
+                    decrypted = self._decrypt_password(two_factor)
+                    account_data["two_factor_secret"] = SecretStr(decrypted)
 
                 account = FacebookAccount(**account_data)
                 self.accounts[account.account_id] = account
@@ -79,16 +81,14 @@ class AccountManager:
                 account_dict = account.model_dump()
 
                 # Convert SecretStr to encrypted string
-                if isinstance(account_dict["password"], dict):
-                    password = account_dict["password"].get("__secret_str__", "")
-                    account_dict["password"] = self._encrypt_password(password)
-
+                if isinstance(account.password, SecretStr):
+                    account_dict["password"] = self._encrypt_password(account.password.get_secret_value())
+                
                 # Convert two_factor_secret if exists
-                if account_dict.get("two_factor_secret") and isinstance(
-                    account_dict["two_factor_secret"], dict
-                ):
-                    two_factor = account_dict["two_factor_secret"].get("__secret_str__", "")
-                    account_dict["two_factor_secret"] = self._encrypt_password(two_factor)
+                if account.two_factor_secret and isinstance(account.two_factor_secret, SecretStr):
+                    account_dict["two_factor_secret"] = self._encrypt_password(
+                        account.two_factor_secret.get_secret_value()
+                    )
 
                 accounts_data.append(account_dict)
 
@@ -119,12 +119,13 @@ class AccountManager:
             encrypted: Encrypted password string
 
         Returns:
-            Original password as SecretStr
+            Original password as a string
         """
         try:
             decrypted = base64.b64decode(encrypted.encode()).decode()
             return decrypted
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error decrypting password: {e}")
             return ""
 
     def add_account(self, account: FacebookAccount) -> bool:

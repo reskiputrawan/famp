@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import click
 from tabulate import tabulate
@@ -118,6 +118,38 @@ def list_accounts(ctx):
 
     headers = ["ID", "Email", "Status", "Proxy", "Notes"]
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
+    
+@account.command("reset")
+@click.confirmation_option(prompt="Are you sure you want to reset all accounts? This cannot be undone!")
+@pass_context
+@handle_error
+def reset_accounts(ctx):
+    """Reset accounts file (use if it becomes corrupted)."""
+    import os
+    
+    accounts_file = ctx.account_manager.accounts_file
+    if accounts_file.exists():
+        backup_file = accounts_file.with_suffix('.json.bak')
+        try:
+            # Create backup of current file
+            if accounts_file.exists():
+                with open(accounts_file, 'rb') as src, open(backup_file, 'wb') as dst:
+                    dst.write(src.read())
+                click.echo(f"Backup created at {backup_file}")
+                
+            # Remove the corrupted file
+            os.remove(accounts_file)
+            click.echo("Accounts file removed")
+            
+            # Reset the accounts manager
+            ctx.account_manager.accounts = {}
+            ctx.account_manager._save_accounts()
+            click.echo("Accounts reset successfully. A new empty accounts file has been created.")
+        except Exception as e:
+            click.echo(f"Error resetting accounts: {e}", err=True)
+    else:
+        click.echo("No accounts file found. Creating new one.")
+        ctx.account_manager._save_accounts()
 
 @account.command("add")
 @click.option("--id", "account_id", required=True, help="Unique account identifier")
@@ -204,6 +236,144 @@ def update_account(ctx, account_id, **kwargs):
 def plugin(ctx):
     """Manage and run plugins."""
     pass
+
+@plugin.command("init")
+@click.argument("plugin_name")
+@click.option("--description", default="A FAMP plugin", help="Plugin description")
+@click.option("--version", default="0.1.0", help="Plugin version")
+@pass_context
+@handle_error
+def init_plugin(ctx, plugin_name, description, version):
+    """Initialize a new plugin with required structure."""
+    # Create plugin directory
+    plugin_dir = Path(ctx.settings.plugins.plugin_dirs[0]) / plugin_name
+    
+    if plugin_dir.exists():
+        click.echo(f"Plugin directory {plugin_dir} already exists.", err=True)
+        return
+    
+    try:
+        # Create plugin directory
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create __init__.py
+        init_content = f"""\"\"\"FAMP plugin: {plugin_name}.\"\"\"
+
+from famp.plugin import Plugin
+from nodriver import Tab
+from famp.core.account import FacebookAccount
+from typing import Dict, Any
+
+class {plugin_name.title().replace('_', '')}Plugin(Plugin):
+    \"\"\"Plugin for {description}.\"\"\"
+
+    name = "{plugin_name}"
+    version = "{version}"
+    description = "{description}"
+
+    @property
+    def requires(self):
+        \"\"\"No dependencies required.\"\"\"
+        return []
+    
+    async def run(self, tab: Tab, account: FacebookAccount) -> Dict[str, Any]:
+        \"\"\"Run the plugin.
+        
+        Args:
+            tab: Browser tab
+            account: Facebook account
+            
+        Returns:
+            Results dictionary
+        \"\"\"
+        # Import the run function from main.py
+        from .main import run as run_main
+        
+        # Create a context object with required attributes
+        context = type('Context', (), {{
+            'browser_manager': None,  # We don't need this anymore
+            'account': account
+        }})()
+        
+        # Since we have direct access to the Tab, we can modify main.py's run function to use it
+        context.tab = tab
+        return await run_main(context)
+
+# Instantiate the plugin for auto-discovery
+plugin = {plugin_name.title().replace('_', '')}Plugin()
+"""
+        
+        # Create main.py
+        main_content = f"""\"\"\"Implementation for {plugin_name} plugin.\"\"\"
+
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def run(context):
+    \"\"\"Run the plugin logic.\"\"\"
+    logger.info("Starting {plugin_name} plugin")
+    
+    try:
+        # Use the tab that was passed in
+        tab = context.tab
+        logger.info("Browser tab ready")
+        
+        # Navigate to a simple test page
+        logger.info("Navigating to example.com")
+        if hasattr(tab, 'goto'):
+            await tab.goto("https://example.com")
+        else:
+            # Try alternate method name
+            await tab.get("https://example.com")
+        logger.info("Navigation complete")
+        
+        # Verify page loaded
+        title = await tab.evaluate("document.title")
+        logger.info(f"Page loaded with title: {{title}}")
+        
+        # Your plugin implementation here
+        # ...
+        
+        # Wait a moment to see the page
+        logger.info("Waiting 3 seconds for visual inspection") 
+        await asyncio.sleep(3)
+        
+        # Take screenshot (if available)
+        try:
+            screenshot_data = await tab.screenshot()
+            logger.info(f"Captured screenshot with {{len(screenshot_data)}} bytes")
+        except (AttributeError, NotImplementedError):
+            logger.info("Screenshot functionality not available")
+        
+        logger.info("Plugin execution complete")
+        
+        return {{
+            "success": True,
+            "title": title,
+            "message": "{plugin_name} executed successfully"
+        }}
+    except Exception as e:
+        logger.error(f"Plugin execution failed: {{e}}")
+        return {{
+            "success": False,
+            "error": str(e),
+            "message": "Plugin execution failed"
+        }}
+"""
+        
+        # Write files
+        with open(plugin_dir / "__init__.py", "w") as f:
+            f.write(init_content)
+            
+        with open(plugin_dir / "main.py", "w") as f:
+            f.write(main_content)
+            
+        click.echo(f"Plugin '{plugin_name}' initialized successfully at {plugin_dir}")
+        click.echo("To use this plugin, restart FAMP or reload plugins.")
+    except Exception as e:
+        click.echo(f"Error creating plugin: {e}", err=True)
 
 @cli.group()
 @click.pass_context
