@@ -262,8 +262,8 @@ class PluginManager:
         """Discover and load plugins from plugin_dirs."""
         for plugin_dir in self.plugin_dirs:
             if not plugin_dir.exists():
-                logger.warning(f"Plugin directory {plugin_dir} does not exist")
-                continue
+                logger.info(f"Creating plugin directory {plugin_dir}")
+                plugin_dir.mkdir(parents=True, exist_ok=True)
 
             # Add plugin dir to path temporarily
             sys.path.insert(0, str(plugin_dir.parent))
