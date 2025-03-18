@@ -1,0 +1,21 @@
+[project]
+name = "famp"
+version = "0.1.0"
+description = "Facebook Account Management Platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "nodriver",
+    "click",
+    "pydantic"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort"
+]
+
+[project.scripts]
+famp = "famp.cli:main"
