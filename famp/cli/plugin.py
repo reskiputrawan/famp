@@ -9,7 +9,10 @@ from typing import Any, Dict, Optional
 import click
 from tabulate import tabulate
 
-from famp.cli.utils import pass_context, handle_error, display_table, load_json_config
+from famp.cli.utils import (
+    pass_context, handle_error, display_table, load_json_config,
+    load_config_file, async_command
+)
 
 @click.group(name="plugin")
 @click.pass_context
@@ -187,8 +190,10 @@ def list_plugins(ctx):
               help="Plugin configuration file")
 @pass_context
 @handle_error
+@async_command
 async def run_plugin(ctx, plugin_name, account_id, headless, config):
     """Run a plugin for a specific account.
+
 
     Arguments:
         PLUGIN_NAME: Name of the plugin to run (required)
@@ -223,7 +228,12 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
             user_agent=account.user_agent or ctx.settings.browser.default_user_agent
         )
 
+        # Progress feedback
+        click.echo(f"\nStarting plugin {plugin_name}...")
+        click.echo("Browser initialized and ready")
+
         # Run plugin with timeout from settings
+        click.echo("Executing plugin...")
         async with asyncio.timeout(ctx.settings.browser.default_timeout):
             results = await ctx.plugin_manager.run_plugin(
                 plugin_name,
@@ -233,28 +243,45 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
             )
 
         # Display results
+        click.echo("\nExecution completed!")
+        click.echo("-" * 50)
+
         if results.get("success", False):
-            click.echo(f"Plugin {plugin_name} executed successfully.")
+            click.secho("✓ Plugin executed successfully", fg="green")
 
             # Format results
             result_table = []
             for key, value in results.items():
                 if key not in ["success", "status"]:
+                    # Handle nested dictionaries/lists
+                    if isinstance(value, (dict, list)):
+                        import json
+                        value = json.dumps(value, indent=2)
                     result_table.append([key, str(value)])
 
             if result_table:
+                click.echo("\nResults:")
                 display_table(result_table, headers=["Key", "Value"])
         else:
-            click.echo(
-                f"Plugin {plugin_name} failed: {results.get('message', 'Unknown error')}",
-                err=True
-            )
+            error_msg = results.get("message", "Unknown error")
+            error_details = results.get("error", "")
+            click.secho("✗ Plugin execution failed", fg="red", err=True)
+            click.echo(f"Error: {error_msg}")
+            if error_details:
+                click.echo(f"Details: {error_details}")
 
     except asyncio.TimeoutError:
-        click.echo(f"Plugin {plugin_name} timed out after {ctx.settings.browser.default_timeout}s", err=True)
+        click.secho(f"✗ Plugin timed out after {ctx.settings.browser.default_timeout}s", fg="red", err=True)
+        click.echo("The plugin execution exceeded the maximum allowed time.")
+        click.echo("Consider increasing the timeout in settings or optimizing the plugin.")
     except Exception as e:
-        click.echo(f"Error running plugin: {e}", err=True)
+        click.secho("✗ Plugin execution error", fg="red", err=True)
+        click.echo(f"Error: {str(e)}")
         ctx.logger.exception("Plugin execution error")
+        click.echo("\nTroubleshooting tips:")
+        click.echo("1. Check if the account credentials are correct")
+        click.echo("2. Verify the plugin configuration")
+        click.echo("3. Try running with --no-headless flag for visual debugging")
     finally:
         # Save cookies and close browser
         try:
@@ -262,3 +289,265 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
             await ctx.browser_manager.close_browser(account_id)
         except Exception as e:
             ctx.logger.error(f"Error during cleanup: {e}")
+
+@plugin_group.command("configure")
+@click.argument("plugin_name")
+@click.argument("config_file", type=click.Path(exists=True))
+@click.option("--merge/--replace", default=True, help="Merge with or replace existing config")
+@pass_context
+@handle_error
+def configure_plugin(ctx, plugin_name, config_file, merge):
+    """Configure a plugin from a JSON or YAML file."""
+    plugin = ctx.plugin_manager.get_plugin(plugin_name)
+    if not plugin:
+        click.echo(f"Plugin {plugin_name} not found.", err=True)
+        return
+
+    # Load configuration
+    config = load_config_file(Path(config_file))
+    if not config:
+        return
+
+    # Get current config if merging
+    current_config = plugin.config.copy() if merge else {}
+
+    # Merge or replace config
+    if merge:
+        current_config.update(config)
+    else:
+        current_config = config
+
+    # Configure plugin
+    try:
+        plugin.configure(current_config)
+        click.echo(f"Plugin {plugin_name} configured successfully.")
+    except Exception as e:
+        click.echo(f"Error configuring plugin: {e}", err=True)
+
+@plugin_group.command("configure-interactive")
+@click.argument("plugin_name")
+@pass_context
+@handle_error
+def configure_plugin_interactive(ctx, plugin_name):
+    """Configure a plugin interactively."""
+    import json
+
+    plugin = ctx.plugin_manager.get_plugin(plugin_name)
+    if not plugin:
+        click.echo(f"Plugin {plugin_name} not found.", err=True)
+        return
+
+    # Get schema
+    schema = getattr(plugin, "config_schema", {})
+    if not schema or not schema.get("properties"):
+        click.echo("Plugin does not have a configuration schema.")
+        # Fall back to current config
+        schema = {"properties": {k: {"description": k} for k in plugin.config}}
+        if not schema["properties"]:
+            click.echo("No configuration options available.")
+            return
+
+    # Build config interactively
+    config = {}
+    for prop_name, prop_schema in schema.get("properties", {}).items():
+        prompt = prop_schema.get("description", prop_name)
+        default = plugin.config.get(prop_name, prop_schema.get("default"))
+
+        # Convert default to string for prompt
+        if default is not None:
+            if isinstance(default, bool):
+                pass  # Click handles bool defaults
+            else:
+                default = str(default)
+
+        # Get type
+        prop_type = prop_schema.get("type", "string")
+
+        if prop_type == "boolean":
+            config[prop_name] = click.confirm(prompt, default=default)
+        elif prop_type == "integer":
+            config[prop_name] = click.prompt(prompt, default=default, type=int)
+        elif prop_type == "number":
+            config[prop_name] = click.prompt(prompt, default=default, type=float)
+        elif prop_type == "array":
+            if default and isinstance(default, list):
+                default_str = ",".join(str(x) for x in default)
+            else:
+                default_str = ""
+            value = click.prompt(f"{prompt} (comma-separated)", default=default_str)
+            config[prop_name] = [x.strip() for x in value.split(",")] if value else []
+        else:
+            config[prop_name] = click.prompt(prompt, default=default)
+
+    # Configure plugin
+    try:
+        plugin.configure(config)
+        click.echo(f"Plugin {plugin_name} configured successfully.")
+
+        # Show new configuration
+        click.echo("\nNew configuration:")
+        click.echo(json.dumps(plugin.config, indent=2))
+    except Exception as e:
+        click.echo(f"Error configuring plugin: {e}", err=True)
+
+@plugin_group.command("info")
+@click.argument("plugin_name")
+@click.option("--json", "output_json", is_flag=True, help="Output in JSON format")
+@pass_context
+@handle_error
+def plugin_info(ctx, plugin_name, output_json):
+    """Show detailed information about a plugin."""
+    import json
+
+    plugin = ctx.plugin_manager.get_plugin(plugin_name)
+    if not plugin:
+        click.echo(f"Plugin {plugin_name} not found.", err=True)
+        return
+
+    # Get plugin metadata and other info
+    try:
+        metadata = plugin.metadata.model_dump()
+    except AttributeError:
+        # Fallback for plugins without metadata
+        metadata = {
+            "name": plugin.name,
+            "description": plugin.description,
+            "version": plugin.version
+        }
+
+    # Add dependencies
+    deps = []
+    for dep in getattr(plugin, "requires", []):
+        deps.append({
+            "name": dep.name,
+            "version_constraint": dep.version_constraint,
+            "optional": dep.optional
+        })
+
+    # Add configuration
+    info = {
+        **metadata,
+        "dependencies": deps,
+        "config": plugin.config,
+        "config_schema": getattr(plugin, "config_schema", {})
+    }
+
+    # Output in JSON format if requested
+    if output_json:
+        click.echo(json.dumps(info, indent=2))
+        return
+
+    # Format for human-readable output
+    click.echo("\nPlugin Information:")
+    click.echo("-" * 50)
+
+    # Basic info
+    for key in ["name", "version", "description", "author", "license", "homepage"]:
+        if key in metadata and metadata[key]:
+            click.echo(f"{key.capitalize():15}: {metadata[key]}")
+
+    # Dependencies
+    if deps:
+        click.echo("\nDependencies:")
+        for dep in deps:
+            optional = " (optional)" if dep.get("optional") else ""
+            version = f" {dep.get('version_constraint')}" if dep.get("version_constraint") else ""
+            click.echo(f"- {dep['name']}{version}{optional}")
+
+    # Current configuration
+    if plugin.config:
+        click.echo("\nCurrent Configuration:")
+        click.echo(json.dumps(plugin.config, indent=2))
+
+    # Configuration schema
+    if "config_schema" in info and info["config_schema"]:
+        click.echo("\nConfiguration Schema:")
+        click.echo(json.dumps(info["config_schema"], indent=2))
+
+@plugin_group.command("test")
+@click.argument("plugin_name")
+@click.option("--account-id", help="Account ID to use (creates temporary account if not specified)")
+@click.option("--headless/--no-headless", default=True, help="Run in headless mode")
+@pass_context
+@handle_error
+@async_command
+async def test_plugin(ctx, plugin_name, account_id, headless):
+    """Test a plugin with minimal configuration."""
+    import json
+    import time
+    from pydantic import SecretStr
+
+    plugin = ctx.plugin_manager.get_plugin(plugin_name)
+    if not plugin:
+        click.echo(f"Plugin {plugin_name} not found.", err=True)
+        return
+
+    # Use provided account or create temporary one
+    temp_account = False
+    if not account_id:
+        # Create temporary test account
+        account_id = f"test_{plugin_name}_{int(time.time())}"
+        from famp.core.account import FacebookAccount
+
+        test_account = FacebookAccount(
+            account_id=account_id,
+            email="test@example.com",
+            password=SecretStr("test_password")
+        )
+        ctx.account_manager.add_account(test_account)
+        click.echo(f"Created temporary test account: {account_id}")
+        temp_account = True
+    else:
+        # Check if account exists
+        account = ctx.account_manager.get_account(account_id)
+        if not account:
+            click.echo(f"Account {account_id} not found.", err=True)
+            return
+
+    try:
+        # Get browser tab
+        tab = await ctx.browser_manager.get_tab(
+            account_id,
+            headless=headless,
+            user_agent=ctx.settings.browser.default_user_agent
+        )
+
+        try:
+            # Run plugin
+            click.echo(f"Testing plugin {plugin_name}...")
+            async with asyncio.timeout(ctx.settings.browser.default_timeout):
+                results = await ctx.plugin_manager.run_plugin(
+                    plugin_name,
+                    tab,
+                    ctx.account_manager.get_account(account_id)
+                )
+
+            # Display results
+            click.echo("\nTest Results:")
+            click.echo("-" * 50)
+            click.echo(json.dumps(results, indent=2))
+
+        except asyncio.TimeoutError:
+            click.echo(f"Plugin {plugin_name} timed out after {ctx.settings.browser.default_timeout}s", err=True)
+        except Exception as e:
+            click.echo(f"Test failed: {str(e)}", err=True)
+            ctx.logger.exception("Plugin execution error")
+
+    except Exception as e:
+        click.echo(f"Error setting up test environment: {str(e)}", err=True)
+        ctx.logger.exception("Test setup error")
+
+    finally:
+        # Cleanup
+        if account_id:
+            # Save cookies and close browser
+            try:
+                await ctx.browser_manager.save_cookies(account_id)
+                await ctx.browser_manager.close_browser(account_id)
+            except Exception as e:
+                ctx.logger.error(f"Error during cleanup: {str(e)}")
+
+            # Remove temporary account if needed
+            if temp_account:
+                ctx.account_manager.remove_account(account_id)
+                click.echo(f"Removed temporary test account: {account_id}")

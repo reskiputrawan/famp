@@ -11,7 +11,8 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union, Tuple
+import click
 
 from nodriver import Tab
 from pydantic import BaseModel
@@ -136,6 +137,7 @@ class Plugin(ABC):
             description=self.description,
             version=self.version
         )
+        self.config_schema: Dict[str, Any] = {}
 
     @abstractmethod
     async def run(self, tab: Tab, account: FacebookAccount) -> Dict[str, Any]:
@@ -191,6 +193,14 @@ class Plugin(ABC):
 
         Returns:
             List of plugin dependencies
+        """
+        return []
+
+    def get_cli_commands(self) -> List[click.Command]:
+        """Get CLI commands provided by this plugin.
+
+        Returns:
+            List of Click commands that will be added to the CLI
         """
         return []
 
@@ -257,6 +267,18 @@ class PluginManager:
         self.plugin_dirs = plugin_dirs or [Path(__file__).parent / "plugins"]
         self._dependency_graph: Dict[str, Set[str]] = {}
         self._load_plugins()
+
+    def get_plugin_commands(self) -> Dict[str, click.Command]:
+        """Get all CLI commands provided by plugins.
+
+        Returns:
+            Dictionary mapping command names to Click commands
+        """
+        commands = {}
+        for name, plugin in self.plugin_instances.items():
+            for command in plugin.get_cli_commands():
+                commands[command.name] = command
+        return commands
 
     def _load_plugins(self) -> None:
         """Discover and load plugins from plugin_dirs."""

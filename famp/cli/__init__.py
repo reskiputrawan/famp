@@ -87,9 +87,22 @@ def config(ctx):
     for line in format_dict(settings_dict):
         click.echo(line)
 
+def register_plugin_commands(cli_app, plugin_manager):
+    """Register commands provided by plugins."""
+    if not plugin_manager:
+        return
+
+    for name, command in plugin_manager.get_plugin_commands().items():
+        cli_app.add_command(command)
+
 def main():
     """Entry point for the CLI."""
-    cli(prog_name="famp")
+    # Initialize CLI with program name
+    cli_obj = cli(prog_name="famp", obj=None, auto_envvar_prefix="FAMP")
+
+    # Register plugin commands if context is available
+    if cli_obj and hasattr(cli_obj, "obj") and cli_obj.obj:
+        register_plugin_commands(cli, cli_obj.obj.plugin_manager)
 
 if __name__ == "__main__":
     main()
