@@ -100,10 +100,58 @@ class PluginSettings(BaseModel):
     )
 
 
+class Environment(str, Enum):
+    """Environment types for FAMP."""
+    DEV = "dev"
+    TEST = "test"
+    PROD = "prod"
+
+class SecuritySettings(BaseModel):
+    """Security-specific settings."""
+    encryption_key: Optional[SecretStr] = Field(
+        default=None,
+        description="Master encryption key for sensitive data"
+    )
+    cookie_encryption: bool = Field(
+        default=True,
+        description="Enable cookie encryption"
+    )
+    secure_storage: bool = Field(
+        default=True,
+        description="Enable secure storage for sensitive data"
+    )
+
+class LoggingSettings(BaseModel):
+    """Logging-specific settings."""
+    level: LogLevel = Field(
+        default=LogLevel.INFO,
+        description="Log level"
+    )
+    file: Optional[Path] = Field(
+        default=None,
+        description="Path to log file"
+    )
+    format: str = Field(
+        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        description="Log format"
+    )
+    rotate_size: int = Field(
+        default=10 * 1024 * 1024,  # 10 MB
+        description="Size in bytes before log rotation"
+    )
+    backup_count: int = Field(
+        default=5,
+        description="Number of backup logs to keep"
+    )
+
 class Settings(BaseModel):
     """Main settings for FAMP."""
 
-    # General settings
+    # Environment settings
+    env: Environment = Field(
+        default=Environment.DEV,
+        description="Current environment (dev/test/prod)"
+    )
     data_dir: Path = Field(
         default_factory=lambda: Path.home() / ".famp",
         description="Directory to store FAMP data"
@@ -112,20 +160,16 @@ class Settings(BaseModel):
         default=None,
         description="Path to configuration file"
     )
-    log_level: LogLevel = Field(
-        default=LogLevel.INFO,
-        description="Log level"
-    )
-    log_file: Optional[Path] = Field(
-        default=None,
-        description="Path to log file"
-    )
-    log_format: str = Field(
-        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        description="Log format"
-    )
 
     # Component settings
+    logging: LoggingSettings = Field(
+        default_factory=LoggingSettings,
+        description="Logging settings"
+    )
+    security: SecuritySettings = Field(
+        default_factory=SecuritySettings,
+        description="Security settings"
+    )
     browser: BrowserSettings = Field(
         default_factory=BrowserSettings,
         description="Browser settings"
@@ -135,39 +179,58 @@ class Settings(BaseModel):
         description="Plugin settings"
     )
 
-    def __init__(self, config_file: Optional[Union[str, Path]] = None, **data: Any):
+    def __init__(
+        self,
+        config_file: Optional[Union[str, Path]] = None,
+        env: Optional[Environment] = None,
+        **data: Any
+    ):
         """Initialize settings.
 
         Args:
             config_file: Path to configuration file
+            env: Environment to use (overrides config/env var)
             **data: Additional settings
         """
         # Convert string path to Path
         if isinstance(config_file, str):
             config_file = Path(config_file)
 
-        # Load settings from environment variables
-        env_settings = self._load_from_env()
+        # Load settings in order of precedence
+        settings = {}
 
-        # Load settings from config file
-        file_settings = {}
-        if config_file:
-            file_settings = self._load_from_file(config_file)
+        # 1. Load from default config file if exists
+        default_config = Path.home() / ".famp" / "config.yaml"
+        if default_config.exists():
+            settings.update(self._load_from_file(default_config))
 
-        # Merge settings (priority: data > env > file > defaults)
-        merged_settings = {}
-        merged_settings.update(file_settings)
-        merged_settings.update(env_settings)
-        merged_settings.update(data)
+        # 2. Load from specified config file
+        if config_file and config_file.exists():
+            settings.update(self._load_from_file(config_file))
+
+        # 3. Load from environment variables
+        settings.update(self._load_from_env())
+
+        # 4. Override with provided data
+        settings.update(data)
+
+        # 5. Override environment if specified
+        if env:
+            settings["env"] = env
 
         # Initialize with merged settings
-        super().__init__(**merged_settings)
+        super().__init__(**settings)
 
         # Store config file path
         self.config_file = config_file
 
         # Create data directory
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Configure browser cookie encryption based on security settings
+        if self.security.cookie_encryption:
+            self.browser.cookies.encryption_enabled = True
+            self.browser.cookies.encryption_key = self.security.encryption_key
 
     def _load_from_env(self) -> Dict[str, Any]:
         """Load settings from environment variables.
@@ -176,18 +239,26 @@ class Settings(BaseModel):
             Dictionary of settings from environment variables
         """
         settings = {}
+        env_prefix = "FAMP_"
+
+        # Environment
+        if os.environ.get(f"{env_prefix}ENV"):
+            settings["env"] = os.environ[f"{env_prefix}ENV"]
 
         # General settings
-        if os.environ.get("FAMP_DATA_DIR"):
-            settings["data_dir"] = Path(os.environ["FAMP_DATA_DIR"])
+        if os.environ.get(f"{env_prefix}DATA_DIR"):
+            settings["data_dir"] = Path(os.environ[f"{env_prefix}DATA_DIR"])
 
-        if os.environ.get("FAMP_LOG_LEVEL"):
-            settings["log_level"] = os.environ["FAMP_LOG_LEVEL"]
+        # Logging settings
+        if os.environ.get(f"{env_prefix}LOG_LEVEL"):
+            settings.setdefault("logging", {})["level"] = os.environ[f"{env_prefix}LOG_LEVEL"]
 
-        if os.environ.get("FAMP_LOG_FILE"):
-            settings["log_file"] = Path(os.environ["FAMP_LOG_FILE"])
+        if os.environ.get(f"{env_prefix}LOG_FILE"):
+            settings.setdefault("logging", {})["file"] = Path(os.environ[f"{env_prefix}LOG_FILE"])
 
-        # More environment variables can be added here
+        # Security settings
+        if os.environ.get(f"{env_prefix}ENCRYPTION_KEY"):
+            settings.setdefault("security", {})["encryption_key"] = os.environ[f"{env_prefix}ENCRYPTION_KEY"]
 
         return settings
 
@@ -218,11 +289,12 @@ class Settings(BaseModel):
             logger.error(f"Error loading configuration file: {e}")
             return {}
 
-    def save(self, config_file: Optional[Path] = None) -> bool:
+    def save(self, config_file: Optional[Path] = None, include_secrets: bool = False) -> bool:
         """Save settings to configuration file.
 
         Args:
             config_file: Path to configuration file (defaults to self.config_file)
+            include_secrets: Whether to include sensitive data like encryption keys
 
         Returns:
             True if settings were saved, False otherwise

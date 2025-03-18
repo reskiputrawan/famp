@@ -142,31 +142,20 @@ class PerformanceTimer:
 
 
 def setup_logging(
-    log_level: str = "INFO",
-    log_file: Optional[Union[str, Path]] = None,
-    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    console: bool = True,
-    file_rotation: bool = True,
-    max_bytes: int = 10 * 1024 * 1024,  # 10 MB
-    backup_count: int = 5,
+    settings: "Settings",
     context: Optional[Dict[str, str]] = None
 ) -> logging.Logger:
     """Set up logging for FAMP.
 
     Args:
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Path to log file
-        log_format: Log message format
-        console: Whether to log to console
-        file_rotation: Whether to use rotating file handler
-        max_bytes: Maximum log file size before rotation
-        backup_count: Number of backup log files to keep
-        context: Dictionary with context information to add to log records
+        settings: Application settings containing logging configuration
+        context: Optional dictionary with context information to add to log records
 
     Returns:
         Root logger
     """
-    # Convert string path to Path
+    # Convert string path to Path if needed
+    log_file = settings.logging.file
     if isinstance(log_file, str):
         log_file = Path(log_file)
 
@@ -177,58 +166,66 @@ def setup_logging(
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    # Set log level
-    level = getattr(logging, log_level.upper(), logging.INFO)
+    # Set log level from settings
+    level = getattr(logging, settings.logging.level.value, logging.INFO)
     root_logger.setLevel(level)
 
     # Create formatters
-    file_formatter = logging.Formatter(log_format)
-    console_formatter = ColoredFormatter(log_format) if COLORAMA_AVAILABLE else file_formatter
+    base_format = settings.logging.format
+    file_formatter = logging.Formatter(base_format)
+
+    # Enhanced console formatter with colors and environment
+    env_format = f"[%(levelname)s] [{settings.env}] {base_format}"
+    console_formatter = ColoredFormatter(env_format) if COLORAMA_AVAILABLE else logging.Formatter(env_format)
 
     # Add context filter if provided
     if context:
         context_filter = ContextFilter(context)
         root_logger.addFilter(context_filter)
 
-    # Add console handler if requested
-    if console:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(console_formatter)
-        root_logger.addHandler(console_handler)
+    # Always add console handler with colored output
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
 
     # Add file handler if log file is specified
     if log_file:
         # Create directory if it doesn't exist
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
-        if file_rotation:
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count
-            )
-        else:
-            file_handler = logging.FileHandler(log_file)
-
+        # Use rotating file handler with settings from config
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=settings.logging.rotate_size,
+            backupCount=settings.logging.backup_count
+        )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
-    # Create FAMP logger
+    # Create and return FAMP logger
     famp_logger = logging.getLogger("famp")
-    famp_logger.info(f"Logging initialized at level {log_level}")
+    famp_logger.info(
+        f"Logging initialized: level={settings.logging.level.value}, "
+        f"environment={settings.env.value}"
+    )
 
     return root_logger
 
 
-def get_logger(name: str, context: Optional[Dict[str, str]] = None) -> logging.Logger:
-    """Get a logger with optional context.
+def get_logger(
+    name: str,
+    context: Optional[Dict[str, str]] = None,
+    level: Optional[str] = None
+) -> logging.Logger:
+    """Get a logger with optional context and level.
 
     Args:
         name: Logger name
-        context: Dictionary with context information to add to log records
+        context: Optional dictionary with context information
+        level: Optional log level override
 
     Returns:
-        Logger with context
+        Logger with context and level
     """
     logger = logging.getLogger(name)
 
@@ -236,6 +233,10 @@ def get_logger(name: str, context: Optional[Dict[str, str]] = None) -> logging.L
         # Add context filter
         context_filter = ContextFilter(context)
         logger.addFilter(context_filter)
+
+    if level:
+        # Override log level if specified
+        logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     return logger
 
