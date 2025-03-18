@@ -47,7 +47,7 @@ def cli(ctx, debug, env, config):
         context = Context()
 
         # Initialize settings with environment override
-        settings_env = Environment(env.upper())
+        settings_env = Environment(env.lower())
         try:
             asyncio.run(context.initialize(
                 config_file=Path(config) if config else None,
@@ -76,7 +76,7 @@ cli.add_command(workflow_group)
 def config(ctx):
     """Show current configuration."""
     from famp.cli.utils import format_dict
-    
+
     # Convert settings to dictionary excluding sensitive data
     settings_dict = ctx.settings.model_dump(exclude={"security"})
 

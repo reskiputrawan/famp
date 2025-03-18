@@ -28,7 +28,7 @@ class Context(BaseModel):
         """Pydantic configuration."""
         arbitrary_types_allowed = True
 
-    async def initialize(self, config_file: Optional[Path] = None) -> None:
+    async def initialize(self, config_file: Optional[Path] = None, env=None) -> None:
         """Initialize all components in the correct order.
 
         Args:
@@ -39,8 +39,8 @@ class Context(BaseModel):
             return
 
         try:
-            # 1. Load settings first
-            self.settings = Settings(config_file=config_file)
+            # 1. Load settings first with environment override if specified
+            self.settings = Settings(config_file=config_file, env=env)
 
             # 2. Setup logging
             setup_logging(
