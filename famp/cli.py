@@ -310,7 +310,7 @@ async def main(context: Context):
         args = ['--help']
     
     # Run CLI with command line arguments
-    await cli.invoke(ctx, args=args)
+    await cli(args, prog_name="famp", standalone_mode=False, obj=ctx.obj)
 
 if __name__ == "__main__":
     # This is only used when running cli.py directly
