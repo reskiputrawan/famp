@@ -3,6 +3,7 @@ Command-line interface for FAMP using Click.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -14,21 +15,24 @@ from tabulate import tabulate
 
 from famp.core.account import AccountManager, FacebookAccount
 from famp.core.browser import BrowserManager
-from famp.core.config import Settings
+from famp.core.config import Environment, Settings
+from famp.core.context import Context
 from famp.plugin import PluginManager
 
 logger = logging.getLogger(__name__)
 
-class Context:
-    """Click context object for storing FAMP components."""
-
-    def __init__(self):
-        self.settings = None
-        self.account_manager = None
-        self.browser_manager = None
-        self.plugin_manager = None
-
 pass_context = click.make_pass_decorator(Context, ensure=True)
+
+def handle_error(func):
+    """Decorator for handling command errors."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Command error: {e}", exc_info=True)
+            click.echo(f"Error: {str(e)}", err=True)
+            sys.exit(1)
+    return wrapper
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
 @click.version_option()
@@ -38,9 +42,10 @@ pass_context = click.make_pass_decorator(Context, ensure=True)
     help='Enable debug mode with verbose logging.',
 )
 @click.option(
-    '--headless/--no-headless',
-    default=True,
-    help='Run browser in headless mode.',
+    '--env', '-e',
+    type=click.Choice(['dev', 'test', 'prod'], case_sensitive=False),
+    default='dev',
+    help='Environment to run in.',
 )
 @click.option(
     '--config', '-c',
@@ -48,27 +53,30 @@ pass_context = click.make_pass_decorator(Context, ensure=True)
     help='Path to configuration file.',
 )
 @click.pass_context
-def cli(ctx, debug, headless, config):
+def cli(ctx, debug, env, config):
     """FAMP - Facebook Account Management Platform.
 
     A tool for automating Facebook account management tasks.
-
-    Available commands:
-    - login: Automate Facebook login process
-    - scroll: Scroll through Facebook feed and collect posts
-    - publish: Publish posts to Facebook
     """
-    if ctx.obj is None:
-        # Create context object if not provided
+    if not ctx.obj or not ctx.obj.is_initialized:
+        # Create context if not provided or not initialized
         context = Context()
 
-        # Load settings
-        context.settings = Settings(config_file=config if config else None)
+        # Initialize settings with environment override
+        settings_env = Environment(env.upper())
+        try:
+            asyncio.run(context.initialize(
+                config_file=Path(config) if config else None,
+                env=settings_env
+            ))
+        except Exception as e:
+            logger.error(f"Failed to initialize context: {e}")
+            click.echo(f"Initialization error: {str(e)}", err=True)
+            sys.exit(1)
 
-        # Set debug mode if requested
+        # Override debug mode if requested
         if debug:
-            context.settings.log_level = "DEBUG"
-            os.environ["FAMP_LOG_LEVEL"] = "DEBUG"
+            context.settings.logging.level = "DEBUG"
 
         # Store context
         ctx.obj = context
@@ -81,6 +89,7 @@ def account(ctx):
 
 @account.command("list")
 @pass_context
+@handle_error
 def list_accounts(ctx):
     """List all Facebook accounts."""
     accounts = ctx.account_manager.list_accounts()
@@ -119,6 +128,7 @@ def list_accounts(ctx):
 @click.option("--notes", help="Notes about this account")
 @click.option("--active/--inactive", default=True, help="Account status")
 @pass_context
+@handle_error
 def add_account(ctx, account_id, email, password, user_agent, proxy, two_factor, notes, active):
     """Add a new Facebook account."""
     # Create account object
@@ -139,12 +149,13 @@ def add_account(ctx, account_id, email, password, user_agent, proxy, two_factor,
     if success:
         click.echo(f"Account {account_id} added successfully.")
     else:
-        click.echo(f"Failed to add account {account_id}. It may already exist.")
+        click.echo(f"Failed to add account {account_id}. It may already exist.", err=True)
 
 @account.command("remove")
 @click.argument("account_id")
 @click.confirmation_option(prompt="Are you sure you want to delete this account?")
 @pass_context
+@handle_error
 def remove_account(ctx, account_id):
     """Remove a Facebook account."""
     success = ctx.account_manager.delete_account(account_id)
@@ -152,7 +163,7 @@ def remove_account(ctx, account_id):
     if success:
         click.echo(f"Account {account_id} removed successfully.")
     else:
-        click.echo(f"Failed to remove account {account_id}. It may not exist.")
+        click.echo(f"Failed to remove account {account_id}. It may not exist.", err=True)
 
 @account.command("update")
 @click.argument("account_id")
@@ -164,13 +175,14 @@ def remove_account(ctx, account_id):
 @click.option("--notes", help="Notes about this account")
 @click.option("--active/--inactive", help="Account status")
 @pass_context
+@handle_error
 def update_account(ctx, account_id, **kwargs):
     """Update an existing Facebook account."""
     # Get existing account
     account = ctx.account_manager.get_account(account_id)
 
     if not account:
-        click.echo(f"Account {account_id} not found.")
+        click.echo(f"Account {account_id} not found.", err=True)
         return
 
     # Update fields
@@ -184,7 +196,7 @@ def update_account(ctx, account_id, **kwargs):
     if success:
         click.echo(f"Account {account_id} updated successfully.")
     else:
-        click.echo(f"Failed to update account {account_id}.")
+        click.echo(f"Failed to update account {account_id}.", err=True)
 
 @cli.group()
 @click.pass_context
@@ -194,6 +206,7 @@ def plugin(ctx):
 
 @plugin.command("list")
 @pass_context
+@handle_error
 def list_plugins(ctx):
     """List all available plugins."""
     plugins = ctx.plugin_manager.list_plugins()
@@ -217,15 +230,18 @@ def list_plugins(ctx):
 @plugin.command("run")
 @click.argument("plugin_name")
 @click.argument("account_id")
-@click.option("--headless/--no-headless", default=False, help="Run in headless mode")
-@click.option("--config", "-c", type=click.Path(exists=True), help="Plugin configuration file")
+@click.option("--headless/--no-headless", default=None,
+              help="Run in headless mode (overrides settings)")
+@click.option("--config", "-c", type=click.Path(exists=True),
+              help="Plugin configuration file")
 @pass_context
+@handle_error
 async def run_plugin(ctx, plugin_name, account_id, headless, config):
     """Run a plugin for a specific account."""
     # Check if account exists
     account = ctx.account_manager.get_account(account_id)
     if not account:
-        click.echo(f"Account {account_id} not found.")
+        click.echo(f"Account {account_id} not found.", err=True)
         return
 
     # Load plugin configuration if provided
@@ -233,96 +249,87 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
     if config:
         try:
             with open(config, "r") as f:
-                import json
                 plugin_config = json.load(f)
         except Exception as e:
-            click.echo(f"Error loading plugin configuration: {e}")
+            click.echo(f"Error loading plugin configuration: {e}", err=True)
             return
 
-    # Get browser tab for account
     try:
+        # Use settings default if headless not specified
+        use_headless = headless if headless is not None else ctx.settings.browser.default_headless
+
+        # Get browser tab for account
         tab = await ctx.browser_manager.get_tab(
             account_id,
-            headless=headless,
-            proxy=account.proxy
+            headless=use_headless,
+            proxy=account.proxy,
+            user_agent=account.user_agent or ctx.settings.browser.default_user_agent
         )
 
-        # Run plugin
-        results = await ctx.plugin_manager.run_plugin(
-            plugin_name,
-            tab,
-            account,
-            config=plugin_config
-        )
+        # Run plugin with timeout from settings
+        async with asyncio.timeout(ctx.settings.browser.default_timeout):
+            results = await ctx.plugin_manager.run_plugin(
+                plugin_name,
+                tab,
+                account,
+                config=plugin_config
+            )
 
         # Display results
         if results.get("success", False):
             click.echo(f"Plugin {plugin_name} executed successfully.")
 
             # Format results
+            result_table = []
             for key, value in results.items():
                 if key not in ["success", "status"]:
-                    click.echo(f"{key}: {value}")
+                    result_table.append([key, str(value)])
+
+            if result_table:
+                click.echo(tabulate(result_table, headers=["Key", "Value"], tablefmt="grid"))
         else:
-            click.echo(f"Plugin {plugin_name} failed: {results.get('message', 'Unknown error')}")
+            click.echo(
+                f"Plugin {plugin_name} failed: {results.get('message', 'Unknown error')}",
+                err=True
+            )
 
-        # Save cookies
-        await ctx.browser_manager.save_cookies(account_id)
-
+    except asyncio.TimeoutError:
+        click.echo(f"Plugin {plugin_name} timed out after {ctx.settings.browser.default_timeout}s", err=True)
     except Exception as e:
-        click.echo(f"Error running plugin: {e}")
+        click.echo(f"Error running plugin: {e}", err=True)
+        logger.exception("Plugin execution error")
     finally:
-        # Close browser
-        await ctx.browser_manager.close_browser(account_id)
+        # Save cookies and close browser
+        try:
+            await ctx.browser_manager.save_cookies(account_id)
+            await ctx.browser_manager.close_browser(account_id)
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
 
 @cli.command()
-@click.pass_context
-def login(ctx):
-    """Automate Facebook login process."""
-    pass
+@pass_context
+@handle_error
+def config(ctx):
+    """Show current configuration."""
+    # Convert settings to dictionary excluding sensitive data
+    settings_dict = ctx.settings.model_dump(exclude={"security"})
 
-@cli.command()
-@click.pass_context
-def scroll(ctx):
-    """Scroll through Facebook feed and collect posts."""
-    pass
+    # Format and display settings
+    click.echo("\nCurrent Configuration:")
+    click.echo("-" * 50)
 
-@cli.command()
-@click.pass_context
-def publish(ctx):
-    """Publish posts to Facebook."""
-    pass
+    def format_dict(d, indent=0):
+        lines = []
+        for key, value in d.items():
+            if isinstance(value, dict):
+                lines.append("  " * indent + f"{key}:")
+                lines.extend(format_dict(value, indent + 1))
+            else:
+                lines.append("  " * indent + f"{key}: {value}")
+        return lines
 
-async def run_async_command(ctx: click.Context, cmd, *args, **kwargs):
-    """Run an async command.
-
-    Args:
-        ctx: Click context
-        cmd: Command to run
-        *args: Command arguments
-        **kwargs: Command keyword arguments
-    """
-    with ctx:  # Ensure context is properly pushed/popped
-        if asyncio.iscoroutinefunction(cmd.callback):
-            return await cmd.callback(ctx, *args, **kwargs)
-        return cmd.callback(ctx, *args, **kwargs)
-
-async def main(context: Context):
-    """Async entry point for CLI.
-
-    Args:
-        context: Context object with initialized components
-    """
-    ctx = click.Context(cli)
-    ctx.obj = context
-
-    try:
-        # Let Click handle argument parsing
-        result = cli.main(args=sys.argv[1:], prog_name="famp", standalone_mode=False)
-        if asyncio.iscoroutine(result):
-            await result
-    except click.exceptions.Exit:
-        pass
+    for line in format_dict(settings_dict):
+        click.echo(line)
 
 if __name__ == "__main__":
     cli(prog_name="famp")
