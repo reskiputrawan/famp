@@ -37,6 +37,6 @@ browser:
 plugins:
   auto_load: true
   plugin_dirs:
-    - ~/.famp/plugins
+    - /Users/ekki/.famp/plugins
     - /Users/ekki/Library/projects/github/famp/plugins # Adding project plugins directory
   disabled_plugins: []
