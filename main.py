@@ -95,4 +95,13 @@ async def handle_shutdown(context: Context) -> None:
     await context.cleanup()
 
 if __name__ == "__main__":
-    main()
+    # Use the appropriate event loop handling for nodriver
+    try:
+        from nodriver import start
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(async_main())
+        sys.exit(result)
+    except Exception as e:
+        print(f"Error starting application: {e}")
+        sys.exit(1)

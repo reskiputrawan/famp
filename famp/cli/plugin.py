@@ -190,10 +190,8 @@ def list_plugins(ctx):
               help="Plugin configuration file")
 @pass_context
 @handle_error
-@async_command
 async def run_plugin(ctx, plugin_name, account_id, headless, config):
     """Run a plugin for a specific account.
-
 
     Arguments:
         PLUGIN_NAME: Name of the plugin to run (required)
@@ -228,12 +226,7 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
             user_agent=account.user_agent or ctx.settings.browser.default_user_agent
         )
 
-        # Progress feedback
-        click.echo(f"\nStarting plugin {plugin_name}...")
-        click.echo("Browser initialized and ready")
-
         # Run plugin with timeout from settings
-        click.echo("Executing plugin...")
         async with asyncio.timeout(ctx.settings.browser.default_timeout):
             results = await ctx.plugin_manager.run_plugin(
                 plugin_name,
@@ -243,45 +236,28 @@ async def run_plugin(ctx, plugin_name, account_id, headless, config):
             )
 
         # Display results
-        click.echo("\nExecution completed!")
-        click.echo("-" * 50)
-
         if results.get("success", False):
-            click.secho("✓ Plugin executed successfully", fg="green")
+            click.echo(f"Plugin {plugin_name} executed successfully.")
 
             # Format results
             result_table = []
             for key, value in results.items():
                 if key not in ["success", "status"]:
-                    # Handle nested dictionaries/lists
-                    if isinstance(value, (dict, list)):
-                        import json
-                        value = json.dumps(value, indent=2)
                     result_table.append([key, str(value)])
 
             if result_table:
-                click.echo("\nResults:")
                 display_table(result_table, headers=["Key", "Value"])
         else:
-            error_msg = results.get("message", "Unknown error")
-            error_details = results.get("error", "")
-            click.secho("✗ Plugin execution failed", fg="red", err=True)
-            click.echo(f"Error: {error_msg}")
-            if error_details:
-                click.echo(f"Details: {error_details}")
+            click.echo(
+                f"Plugin {plugin_name} failed: {results.get('message', 'Unknown error')}",
+                err=True
+            )
 
     except asyncio.TimeoutError:
-        click.secho(f"✗ Plugin timed out after {ctx.settings.browser.default_timeout}s", fg="red", err=True)
-        click.echo("The plugin execution exceeded the maximum allowed time.")
-        click.echo("Consider increasing the timeout in settings or optimizing the plugin.")
+        click.echo(f"Plugin {plugin_name} timed out after {ctx.settings.browser.default_timeout}s", err=True)
     except Exception as e:
-        click.secho("✗ Plugin execution error", fg="red", err=True)
-        click.echo(f"Error: {str(e)}")
+        click.echo(f"Error running plugin: {e}", err=True)
         ctx.logger.exception("Plugin execution error")
-        click.echo("\nTroubleshooting tips:")
-        click.echo("1. Check if the account credentials are correct")
-        click.echo("2. Verify the plugin configuration")
-        click.echo("3. Try running with --no-headless flag for visual debugging")
     finally:
         # Save cookies and close browser
         try:
