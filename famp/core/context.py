@@ -44,9 +44,8 @@ class Context(BaseModel):
 
             # 2. Setup logging
             setup_logging(
-                log_level=self.settings.log_level,
-                log_file=self.settings.log_file,
-                log_format=self.settings.log_format
+                settings=self.settings,
+                context={"component": "context"}
             )
 
             logger.info("Initializing FAMP context")

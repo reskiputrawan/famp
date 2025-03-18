@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+from famp.core.config import Settings
+
 # Try to import colorama for colored console output
 try:
     import colorama

@@ -143,6 +143,28 @@ class LoggingSettings(BaseModel):
         default=5,
         description="Number of backup logs to keep"
     )
+    
+    @field_validator("file", mode="before")
+    @classmethod
+    def validate_log_file_path(cls, value: Any) -> Optional[Path]:
+        """Validate and convert log file path to Path object.
+
+        Args:
+            value: Path value
+
+        Returns:
+            Path object or None
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            return Path(value).expanduser().absolute()
+
+        if isinstance(value, Path):
+            return value.expanduser().absolute()
+
+        raise ValueError(f"Invalid log file path: {value}")
 
 class Settings(BaseModel):
     """Main settings for FAMP."""
@@ -394,7 +416,7 @@ class Settings(BaseModel):
 
         return self
 
-    @field_validator("data_dir", "log_file", mode="before")
+    @field_validator("data_dir", mode="before")
     @classmethod
     def validate_path(cls, value: Any) -> Path:
         """Validate and convert path to Path object.
