@@ -19,6 +19,7 @@ from famp.plugin import PluginManager
 
 async def async_main():
     """Async main function to initialize and run FAMP components."""
+    logger = None
     try:
         # Create and initialize context
         context = Context()
@@ -39,13 +40,19 @@ async def async_main():
 
     except click.exceptions.Exit as e:
         if e.exit_code != 0:  # Normal exit with code 0 is fine
-            logger.error(f"CLI error: Exit code {e.exit_code}")
+            if logger:
+                logger.error(f"CLI error: Exit code {e.exit_code}")
+            else:
+                print(f"CLI error: Exit code {e.exit_code}")
             return e.exit_code
     except Exception as e:
-        logger.exception(f"Fatal error in FAMP: {e}")
+        if logger:
+            logger.exception(f"Fatal error in FAMP: {e}")
+        else:
+            print(f"Fatal error in FAMP: {e}")
         return 1
     finally:
-        if "context" in locals():
+        if "context" in locals() and context:
             await context.cleanup()
 
     return 0
@@ -56,8 +63,11 @@ async def handle_shutdown(context: Context) -> None:
     Args:
         context: Application context
     """
-    logger = logging.getLogger("famp")
-    logger.info("Initiating graceful shutdown...")
+    try:
+        logger = logging.getLogger("famp")
+        logger.info("Initiating graceful shutdown...")
+    except Exception:
+        print("Initiating graceful shutdown...")
 
     await context.cleanup()
 
@@ -77,12 +87,10 @@ def main():
         sys.exit(exit_code)
     except KeyboardInterrupt:
         # Handle KeyboardInterrupt outside of async code
-        logger = logging.getLogger("famp")
-        logger.info("FAMP terminated by user")
+        print("\nFAMP terminated by user")
         sys.exit(0)
     except Exception as e:
-        logger = logging.getLogger("famp")
-        logger.exception("Unexpected error in FAMP main")
+        print(f"Unexpected error in FAMP main: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
