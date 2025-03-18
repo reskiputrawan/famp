@@ -79,7 +79,9 @@ def main():
             loop = asyncio.ProactorEventLoop()
             asyncio.set_event_loop(loop)
         else:
-            loop = asyncio.get_event_loop()
+            # Create new event loop instead of getting the current one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
         # Run main function using loop.run_until_complete
         exit_code = loop.run_until_complete(async_main())
