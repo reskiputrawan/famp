@@ -76,6 +76,39 @@ Publish a post:
 python main.py publish
 ```
 
+## Cookie Management
+
+FAMP uses pickle format to save browser cookies with nodriver, providing seamless session persistence:
+
+```python
+# Example of working with cookies programmatically
+async def save_and_load_cookies():
+    browser_manager = BrowserManager()
+    
+    # Get browser for an account
+    browser = await browser_manager.get_browser("account_name")
+    
+    # Navigation happens here...
+    
+    # Save cookies for later
+    await browser_manager.save_cookies("account_name")
+    
+    # In another session, load the cookies
+    await browser_manager.load_cookies("account_name")
+```
+
+Configure cookie settings in your YAML config:
+
+```yaml
+browser:
+  cookies:
+    use_pickle: true  # Recommended for nodriver compatibility
+    encryption_enabled: true
+    domain_filter:
+      - facebook.com
+      - fb.com
+```
+
 ## Development
 
 This project is currently in POC phase.
