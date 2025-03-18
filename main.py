@@ -38,6 +38,28 @@ async def async_main():
         if asyncio.iscoroutine(result):
             await result
 
+    except click.exceptions.MissingParameter as e:
+        # Handle missing parameter error with user-friendly message
+        param_name = getattr(e, 'param', None)
+        param_name = param_name.name if param_name else 'parameter'
+
+        if logger:
+            logger.error(f"Missing required parameter: {param_name}")
+
+        # Show helpful command usage
+        command_path = " ".join([p for p in e.ctx.command_path.split() if p != "famp"])
+        print(f"\nError: Missing required parameter: {param_name}")
+        print(f"\nUsage: uv run main.py {command_path} [OPTIONS] {param_name.upper()}")
+
+        # For plugin run command specifically
+        if 'plugin run' in command_path:
+            print("\nExample:")
+            print("  uv run main.py plugin run manual_login my_account_id")
+            print("\nTo see all accounts:")
+            print("  uv run main.py account list")
+
+        return 1
+
     except click.exceptions.Exit as e:
         if e.exit_code != 0:  # Normal exit with code 0 is fine
             if logger:

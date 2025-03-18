@@ -26,7 +26,7 @@ class ManualLoginPlugin(Plugin):
     version = "0.1.0"
 
     # Facebook URLs
-    LOGIN_URL = "https://www.facebook.com/login/"
+    LOGIN_URL = "https://www.facebook.com/"
     HOME_URL = "https://www.facebook.com/"
     CHECKPOINT_URL = "https://www.facebook.com/checkpoint/"
 

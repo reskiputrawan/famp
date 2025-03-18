@@ -255,7 +255,7 @@ class Workflow(BaseModel):
 
         try:
             with open(state_file, "w") as f:
-                json.dump(state, f, indent=2)
+                json.dump(state, f, indent=2, cls=DateTimeEncoder)
         except Exception as e:
             logger.error(f"Failed to save workflow state: {e}")
 
@@ -296,6 +296,13 @@ class Workflow(BaseModel):
             logger.error(f"Failed to load workflow state: {e}")
             return None
 
+class DateTimeEncoder(json.JSONEncoder):
+    """JSON encoder that can handle datetime objects."""
+    def default(self, obj):
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
 class WorkflowManager:
     """Manages FAMP workflows."""
 
@@ -326,6 +333,33 @@ class WorkflowManager:
             except Exception as e:
                 logger.error(f"Failed to load workflow {state_file.name}: {e}")
 
+    def _save_workflow_sync(self, workflow: Workflow) -> None:
+        """Save workflow state to disk synchronously.
+
+        Args:
+            workflow: Workflow to save
+        """
+        if not workflow.data_dir:
+            return
+
+        # Create workflow directory
+        workflow_dir = workflow.data_dir / "workflows"
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save workflow state
+        state_file = workflow_dir / f"{workflow.name}.json"
+        state = workflow.model_dump()
+
+        # Convert paths to strings
+        if state.get("data_dir"):
+            state["data_dir"] = str(state["data_dir"])
+
+        try:
+            with open(state_file, "w") as f:
+                json.dump(state, f, indent=2, cls=DateTimeEncoder)
+        except Exception as e:
+            logger.error(f"Failed to save workflow state: {e}")
+
     def create_workflow(self, name: str, description: str) -> Workflow:
         """Create a new workflow.
 
@@ -349,6 +383,10 @@ class WorkflowManager:
             steps=[]
         )
         self.workflows[name] = workflow
+
+        # Immediately save the workflow to disk
+        self._save_workflow_sync(workflow)
+
         return workflow
 
     def get_workflow(self, name: str) -> Optional[Workflow]:

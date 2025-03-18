@@ -6,7 +6,7 @@ data_dir: ~/.famp
 
 # Logging settings
 logging:
-  level: ERROR # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: WARNING # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
   file: ~/.famp/logs/famp.log
   format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
   rotate_size: 10485760 # 10 MB

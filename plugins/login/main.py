@@ -303,7 +303,7 @@ class LoginPlugin(Plugin):
             logged_in_indicators = [
                 # Profile menu
                 "div[aria-label*='Your profile']",
-                "div[aria-label*='your profile']",
+                "div[aria-label*='Profil Anda']",
                 # News Feed
                 "div[aria-label='News Feed']",
                 "div[role='main']",
@@ -319,12 +319,12 @@ class LoginPlugin(Plugin):
                     return True
 
             # Check URL for login-related paths
-            current_url = await tab.get_url()
-            if not any(path in current_url for path in ["/login", "/checkpoint"]):
-                # Additional check for profile-related elements
-                profile_elements = await tab.find("your profile", best_match=True, timeout=5)
-                if profile_elements:
-                    return True
+            # current_url = await tab.get_url()
+            # if not any(path in current_url for path in ["/login", "/checkpoint"]):
+            #     # Additional check for profile-related elements
+            #     profile_elements = await tab.find("your profile", best_match=True, timeout=5)
+            #     if profile_elements:
+            #         return True
 
             return False
 
